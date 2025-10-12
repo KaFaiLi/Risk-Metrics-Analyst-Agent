@@ -1,0 +1,351 @@
+from datetime import datetime
+from io import BytesIO
+from typing import List
+import zipfile
+
+import plotly.io as pio
+
+
+def create_html_report(metrics_analyses: List[dict], portfolio_summary: str, file_name: str) -> str:
+    """Create a comprehensive HTML report for the risk analysis."""
+    metric_sections = []
+
+    for analysis in metrics_analyses:
+        metric = analysis["metric"]
+        stats = analysis["stats"]
+        outliers = analysis["outliers"]
+        outlier_dates = analysis.get("outlier_dates", [])
+        breaches = analysis["breaches"]
+        insights = analysis["insights"]
+        fig = analysis["fig"]
+
+        fig_html = fig.to_html(include_plotlyjs="cdn", div_id=f"plot-{metric.replace('/', '_')}")
+
+        outlier_html = ""
+        if len(outliers) > 0:
+            date_list = ", ".join(outlier_dates[:10])
+            more_flag = "" if len(outlier_dates) <= 10 else "…"
+            outlier_html = f"""
+            <div class="outliers">
+                <h4>Detected Outliers (±2 SD)</h4>
+                <p>Total outliers: {len(outliers)}</p>
+                <p>Sample values: {', '.join([f'{v:.4f}' for v in outliers[:5]])}</p>
+                <p>Dates: {date_list}{more_flag}</p>
+            </div>
+            """
+
+        breach_html = ""
+        if breaches:
+            breach_items = []
+            for breach in breaches:
+                label = "Max" if breach["type"] == "max" else "Min"
+                date_str = ", ".join(breach["dates"][:10])
+                more_flag = "" if len(breach["dates"]) <= 10 else "…"
+                breach_items.append(f"<li>{label} limit breached {breach['count']} times on {date_str}{more_flag}</li>")
+
+            breach_html = f"""
+            <div class="breaches">
+                <h4>⚠️ Limit Breaches</h4>
+                <ul>
+                    {''.join(breach_items)}
+                </ul>
+            </div>
+            """
+
+        metric_section = f"""
+        <div class="metric-section">
+            <h2>📊 {metric} Analysis</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Mean</div>
+                    <div class="stat-value">{stats['mean']:.4f}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Median</div>
+                    <div class="stat-value">{stats['median']:.4f}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Std Deviation</div>
+                    <div class="stat-value">{stats['std']:.4f}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Min</div>
+                    <div class="stat-value">{stats['min']:.4f}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Max</div>
+                    <div class="stat-value">{stats['max']:.4f}</div>
+                </div>
+            </div>
+            
+            {outlier_html}
+            {breach_html}
+            
+            <div class="chart-container">
+                {fig_html}
+            </div>
+            
+            <div class="insights-section">
+                <h3>🤖 AI-Generated Insights</h3>
+                <div class="insights-content">
+                    {insights.replace(chr(10), '<br><br>')}
+                </div>
+            </div>
+        </div>
+        """
+        metric_sections.append(metric_section)
+
+    portfolio_html = ""
+    if len(metrics_analyses) > 1 and portfolio_summary:
+        portfolio_html = f"""
+        <div class="portfolio-summary">
+            <h2>📋 Risk Portfolio Summary</h2>
+            <div class="portfolio-content">
+                {portfolio_summary.replace(chr(10), '<br><br>')}
+            </div>
+        </div>
+        """
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Risk Metrics Analysis Report - {file_name}</title>
+        <meta charset="utf-8">
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #f5f5f5;
+                color: #333;
+            }}
+            .container {{
+                max-width: 1400px;
+                margin: 0 auto;
+                background-color: white;
+                padding: 40px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            h1 {{
+                color: #1f77b4;
+                text-align: center;
+                margin-bottom: 10px;
+                font-size: 36px;
+            }}
+            .subtitle {{
+                text-align: center;
+                color: #666;
+                margin-bottom: 40px;
+                font-size: 18px;
+            }}
+            .metric-section {{
+                margin: 40px 0;
+                padding: 30px;
+                background-color: #fafafa;
+                border-radius: 8px;
+                border-left: 5px solid #1f77b4;
+            }}
+            .metric-section h2 {{
+                color: #1f77b4;
+                margin-top: 0;
+            }}
+            .stats-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                margin: 25px 0;
+            }}
+            .stat-card {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                text-align: center;
+            }}
+            .stat-label {{
+                font-size: 14px;
+                opacity: 0.9;
+                margin-bottom: 8px;
+            }}
+            .stat-value {{
+                font-size: 24px;
+                font-weight: bold;
+            }}
+            .outliers {{
+                margin: 20px 0;
+                padding: 20px;
+                background-color: #fff3cd;
+                border-radius: 8px;
+                border-left: 4px solid #ffc107;
+            }}
+            .outliers h4 {{
+                margin-top: 0;
+                color: #856404;
+            }}
+            .breaches {{
+                margin: 20px 0;
+                padding: 20px;
+                background-color: #f8d7da;
+                border-radius: 8px;
+                border-left: 4px solid #dc3545;
+            }}
+            .breaches h4 {{
+                margin-top: 0;
+                color: #721c24;
+            }}
+            .breaches ul {{
+                margin: 10px 0;
+                padding-left: 20px;
+            }}
+            .chart-container {{
+                margin: 30px 0;
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+            }}
+            .insights-section {{
+                margin-top: 30px;
+                padding: 25px;
+                background-color: #f0f2f6;
+                border-radius: 8px;
+                border-left: 4px solid #1f77b4;
+            }}
+            .insights-section h3 {{
+                margin-top: 0;
+                color: #1f77b4;
+            }}
+            .insights-content {{
+                line-height: 1.8;
+                font-size: 15px;
+            }}
+            .portfolio-summary {{
+                margin: 50px 0;
+                padding: 35px;
+                background-color: #e8f4f8;
+                border-radius: 10px;
+                border-left: 5px solid #0066cc;
+            }}
+            .portfolio-summary h2 {{
+                color: #0066cc;
+                margin-top: 0;
+            }}
+            .portfolio-content {{
+                line-height: 1.8;
+                font-size: 16px;
+            }}
+            .footer {{
+                margin-top: 50px;
+                padding-top: 30px;
+                border-top: 2px solid #e0e0e0;
+                text-align: center;
+                color: #888;
+                font-size: 14px;
+            }}
+            @media print {{
+                body {{
+                    background-color: white;
+                }}
+                .container {{
+                    box-shadow: none;
+                }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📊 Risk Metrics Analysis Report</h1>
+            <p class="subtitle">Source File: {file_name}</p>
+            <p class="subtitle">Analyzed Metrics: {', '.join([a['metric'] for a in metrics_analyses])}</p>
+            
+            {''.join(metric_sections)}
+            
+            {portfolio_html}
+            
+            <div class="footer">
+                <p><strong>Report Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>AI Analysis:</strong> Google Gemini</p>
+                <p>Generated by AI, use with caution.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    return html_content
+
+
+def create_export_package(metrics_analyses: List[dict], portfolio_summary: str, file_name: str) -> BytesIO:
+    """Create a ZIP archive containing the report, charts, and summary text."""
+    html_content = create_html_report(metrics_analyses, portfolio_summary, file_name)
+
+    zip_buffer = BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("risk_analysis_report.html", html_content)
+
+        for analysis in metrics_analyses:
+            metric = analysis["metric"]
+            fig = analysis["fig"]
+            img_bytes = pio.to_image(fig, format="png", width=1200, height=600, scale=2)
+            zip_file.writestr(f"charts/{metric.replace('/', '_')}_chart.png", img_bytes)
+
+        summary_text = f"""Risk Metrics Analysis Summary
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Source File: {file_name}
+Metrics Analyzed: {', '.join([a['metric'] for a in metrics_analyses])}
+
+{'='*80}
+
+"""
+
+        for analysis in metrics_analyses:
+            metric = analysis["metric"]
+            stats = analysis["stats"]
+            insights = analysis["insights"]
+            breaches = analysis["breaches"]
+
+            breach_text = ""
+            if breaches:
+                formatted = []
+                for breach in breaches:
+                    label = "Max" if breach["type"] == "max" else "Min"
+                    date_str = ", ".join(breach["dates"])
+                    formatted.append(f"  - {label} limit breached {breach['count']} times on {date_str}")
+                breach_text = "\n\nLimit Breaches:\n" + "\n".join(formatted)
+
+            summary_text += f"""
+{metric} ANALYSIS
+{'='*80}
+
+Statistics:
+- Mean: {stats['mean']:.4f}
+- Median: {stats['median']:.4f}
+- Standard Deviation: {stats['std']:.4f}
+- Min: {stats['min']:.4f}
+- Max: {stats['max']:.4f}{breach_text}
+
+AI Insights:
+{insights}
+
+{'='*80}
+
+"""
+
+        if portfolio_summary:
+            summary_text += f"""
+RISK PORTFOLIO SUMMARY
+{'='*80}
+
+{portfolio_summary}
+"""
+
+        zip_file.writestr("summary.txt", summary_text)
+
+    zip_buffer.seek(0)
+    return zip_buffer
+
+
+__all__ = ["create_export_package", "create_html_report"]

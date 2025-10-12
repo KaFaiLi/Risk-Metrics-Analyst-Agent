@@ -1,0 +1,16 @@
+# Minimal requirements inferred from app_demo.py
+# Review and pin versions as needed for your environment.
+
+streamlit
+yfinance
+plotly
+kaleido
+pandas
+numpy
+langchain
+# The code imports `ChatGoogleGenerativeAI` from `langchain_google_genai`.
+# Depending on the package you used, the PyPI name may be one of:
+# - langchain-google-generative-ai
+# - langchain-google-genai
+# If installation fails, try the correct package name for your environment.
+langchain-google-generative-ai

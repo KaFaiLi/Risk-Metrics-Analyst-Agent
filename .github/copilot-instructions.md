@@ -1,0 +1,22 @@
+# Copilot Instructions for Risk-Metrics-Analyst-Agent
+- **Context:** Single-page Streamlit app in `app_demo.py` that reads risk-metric CSVs, visualizes them with Plotly, and requests Google Gemini summaries via LangChain.
+- **Runbook:** Start with `python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt`; launch locally using `streamlit run app_demo.py`.
+- **API key handling:** The sidebar prompts for a Google API key; when provided it is injected into `os.environ['GOOGLE_API_KEY']`. Any automation must set this env var (or mock `ChatGoogleGenerativeAI`).
+- **Data contract:** Uploaded CSV must have a `ValueDate` column parseable by `pd.to_datetime`, risk metric columns with numeric data, and optional limit columns suffixed `_limMaxValue`/`_limMinValue`. Break this contract and the pipeline raises inside `pd.read_csv` or plotting.
+- **Metric ordering:** `organize_metrics` prioritizes `['VaR','SVaR','FTQ']`, then sorts remaining metrics by parsed maturity (e.g., `1W`, `1M`, `2Y`). Extend the priority list in that helper when adding new headline metrics.
+- **Statistics logic:** `calculate_statistics` computes mean/median/std/min/max/count and flags ±2σ outliers. Downstream UI assumes these keys exist in the stats dict; preserve them when refactoring.
+- **Limit checks:** `check_limit_breaches` expects Series for limits and reports simple count strings. Leave Series alignment untouched (same index as metric values) to avoid silent mismatches.
+- **Plotting:** `create_plotly_chart` overlays metric, mean/median bands, limit bands, and outlier markers. It relies on Plotly Express offline mode; exporting PNGs uses `pio.write_image` / `pio.to_image`, so keep `kaleido` installed.
+- **AI prompts:** `create_llm_prompt` and `create_portfolio_summary_prompt` craft deterministic, structured prompts consumed by `ChatGoogleGenerativeAI(model='gemini-2.5-flash')`. Preserve key bullet requests so the UI copy stays aligned with downstream styling.
+- **Session state:** Streamlit session keys (`metrics_analyses`, `portfolio_summary`, etc.) gate export buttons and the "Clear" action. When adding new computations, stash them into `st.session_state` to survive reruns.
+- **Exports:** `create_html_report` assembles Plotly divs plus narrative text; `create_export_package` bundles that HTML, chart PNGs, and a text summary. Any new artifact should be added to the ZIP writer in this helper.
+- **Reference assets:** PNG files in the repo are sample outputs; `Fake Pivot SGMR.csv` is an example input. Use them for local smoke tests rather than hardcoding paths.
+- **Error surfacing:** Failures from Gemini calls bubble up as `Error generating ...` strings displayed in the UI; keep this pattern for actionable feedback without crashing Streamlit.
+- **Testing:** No automated tests exist. Validate changes by running `streamlit run app_demo.py`, uploading `Fake Pivot SGMR.csv`, and exercising both single-metric and multi-metric flows (including exports).
+- **Style:** Default to ASCII, keep UI text emoji-friendly (matching existing pattern), and prefer concise helper functions with docstrings summarizing intent.
+- **Common extension points:** When onboarding new risk metrics or alternative AI models, update `organize_metrics`, prompt builders, and dependency list (`requirements.txt`) together to maintain end-to-end functionality.
+- **Linting/formatting:** Codebase currently follows plain Python style without formatters; keep indentation consistent and avoid introducing new tooling without discussion.
+- **Env expectations:** Target Python 3.8+; Streamlit and Plotly are the only heavy dependencies. Ensure `kaleido` installs successfully on Windows for image exports.
+- **Debug tips:** For prompt/response issues, wrap `ChatGoogleGenerativeAI.invoke` in a temporary `st.write` block; for plotting glitches, inspect `df` contents before calling `create_plotly_chart`.
+- **Deployment note:** App assumes desktop usage with interactive downloads. No containerization scripts exist; if adding them, document new commands here.
+- **Documentation gating:** Update this file whenever AI-facing behaviors (prompt format, data schema, export structure) change so assistants stay aligned.
