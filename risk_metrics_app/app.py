@@ -279,7 +279,8 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
             max_limit = df[max_limit_col] if max_limit_col in df.columns else None
             min_limit = df[min_limit_col] if min_limit_col in df.columns else None
 
-            stats, outliers = calculate_statistics(df[metric])
+            metric_series = df[metric]
+            stats, outliers = calculate_statistics(metric_series)
             breaches = check_limit_breaches(df, metric, max_limit, min_limit)
 
             col1, col2, col3, col4, col5 = st.columns(5)
@@ -320,7 +321,27 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
 
             st.subheader("🤖 AI-Generated Insights")
             insights_placeholder = st.empty()
-            insights_placeholder.info("🤖 Generating AI insights...")
+
+            valid_count = metric_series.count()
+            zero_ratio = (metric_series == 0).sum() / valid_count if valid_count else 0.0
+            skip_llm = zero_ratio >= 0.95
+            if skip_llm:
+                logger.info(
+                    "Skipping LLM analysis for %s due to low exposure (zero ratio %.2f)",
+                    metric,
+                    zero_ratio,
+                )
+                insight_text = "Low exposure, no insight"
+                insights_placeholder.markdown(
+                    f"""
+                    <div style=\"background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 4px solid #6c757d;\">
+                        {insight_text}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                insights_placeholder.info("🤖 Generating AI insights...")
 
             metrics_analyses.append(
                 {
@@ -329,20 +350,21 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
                     "outliers": outliers,
                     "outlier_dates": outlier_dates,
                     "breaches": breaches,
-                    "insights": None,
+                    "insights": "Low exposure, no insight" if skip_llm else None,
                     "fig": fig,
                 }
             )
 
-            llm_requests.append(
-                {
-                    "metric": metric,
-                    "prompt_text": prompt_text,
-                    "img_base64": img_base64,
-                    "placeholder": insights_placeholder,
-                    "analysis_index": len(metrics_analyses) - 1,
-                }
-            )
+            if not skip_llm:
+                llm_requests.append(
+                    {
+                        "metric": metric,
+                        "prompt_text": prompt_text,
+                        "img_base64": img_base64,
+                        "placeholder": insights_placeholder,
+                        "analysis_index": len(metrics_analyses) - 1,
+                    }
+                )
 
             if idx < len(ordered_metrics) - 1:
                 st.divider()

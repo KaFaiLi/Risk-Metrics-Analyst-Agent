@@ -5,20 +5,33 @@ import pandas as pd
 
 PRIORITY_METRICS = ["VaR", "SVaR", "STTHH"]
 
+VALUE_DATE_COLUMN = "valuedate"
+LIMIT_MAX_SUFFIX = "_limmaxvalue"
+LIMIT_MIN_SUFFIX = "_limminvalue"
+
+
+def _strip_limit_suffix(column_name: str) -> str:
+    """Remove known limit suffixes from a column name in a case-insensitive way."""
+    stripped = re.sub(r"(?i)_limmaxvalue$", "", column_name)
+    stripped = re.sub(r"(?i)_limminvalue$", "", stripped)
+    return stripped
+
 
 def parse_metric_name(column_name: str) -> Tuple[str, Optional[str]]:
     """Parse metric name to extract base name and optional maturity code."""
-    base_name = column_name.replace("_limMaxValue", "").replace("_limMinValue", "")
+    base_name = _strip_limit_suffix(column_name)
 
-    basis_match = re.match(r"BasisSensiByCurrencyByPillar\[(\w+)\]\[(\w+)\]", base_name)
+    basis_match = re.match(r"(?i)BasisSensiByCurrencyByPillar\[(\w+)\]\[(\w+)\]", base_name)
     if basis_match:
         currency = basis_match.group(1)
         maturity = basis_match.group(2)
         return f"BasisSensi_{currency}", maturity
 
-    maturity_match = re.search(r"(\d+[DWMY])", base_name)
+    maturity_match = re.search(r"(?i)(\d+)([DWMY])", base_name)
     if maturity_match:
-        maturity = maturity_match.group(1)
+        value_part = maturity_match.group(1)
+        unit_part = maturity_match.group(2).upper()
+        maturity = f"{value_part}{unit_part}"
         base_without_maturity = base_name[:maturity_match.start()] + base_name[maturity_match.end():]
         base_without_maturity = base_without_maturity.strip("_") or base_name
         return base_without_maturity, maturity
@@ -31,12 +44,12 @@ def get_maturity_order(maturity: Optional[str]) -> int:
     if not maturity:
         return 0
 
-    match = re.match(r"(\d+)([DWMY])", maturity)
+    match = re.match(r"(?i)(\d+)([DWMY])", maturity)
     if not match:
         return 0
 
     value = int(match.group(1))
-    unit = match.group(2)
+    unit = match.group(2).upper()
     multipliers = {"D": 1, "W": 7, "M": 30, "Y": 365}
     return value * multipliers.get(unit, 0)
 
@@ -46,11 +59,19 @@ def organize_metrics(df: pd.DataFrame) -> List[str]:
     metric_columns = [
         col
         for col in df.columns
-        if col != "ValueDate" and not col.endswith("_limMaxValue") and not col.endswith("_limMinValue")
+        if col.lower() != VALUE_DATE_COLUMN
+        and not col.lower().endswith(LIMIT_MAX_SUFFIX)
+        and not col.lower().endswith(LIMIT_MIN_SUFFIX)
     ]
 
-    priority_cols = [col for col in metric_columns if col in PRIORITY_METRICS]
-    other_cols = [col for col in metric_columns if col not in PRIORITY_METRICS]
+    priority_cols = []
+    for metric in PRIORITY_METRICS:
+        metric_lower = metric.lower()
+        for col in metric_columns:
+            if col.lower() == metric_lower:
+                priority_cols.append(col)
+
+    other_cols = [col for col in metric_columns if col not in priority_cols]
 
     parsed_metrics = []
     for col in other_cols:
