@@ -64,7 +64,11 @@ async def process_llm_requests(
         message = HumanMessage(
             content=[
                 {"type": "text", "text": request["prompt_text"]},
-                {"type": "image_url", "image_url": f"data:image/png;base64,{request['img_base64']}"},
+                {"type": "image_url", 
+                 "image_url": {
+                     "url": f"data:image/png;base64,{request['img_base64']}"
+                     }
+                },
             ]
         )
 

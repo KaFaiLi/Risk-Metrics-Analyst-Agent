@@ -13,4 +13,4 @@ langchain
 # - langchain-google-generative-ai
 # - langchain-google-genai
 # If installation fails, try the correct package name for your environment.
-langchain-google-generative-ai
+langchain-google-genai
