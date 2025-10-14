@@ -16,26 +16,46 @@ def create_llm_prompt(metric_name: str, stats: dict, outliers: Series, breaches:
     if breaches:
         breach_info = f"\n\nLimit Breaches: {'; '.join(breaches)}"
 
-    text_content = f"""Please analyze this {metric_name} risk metric chart and provide insights.
+    text_content = f"""
+You are a senior quantitative risk analyst with deep expertise in market risk metrics and trading desk behavior. 
+Analyze the {metric_name} risk metric chart with both statistical rigor and practical business insight.
 
-Statistical Summary:
-- Mean: {stats['mean']:.4f}
-- Median: {stats['median']:.4f}
-- Standard Deviation: {stats['std']:.4f}
-- Min: {stats['min']:.4f}
-- Max: {stats['max']:.4f}
-- Range: {stats['max'] - stats['min']:.4f}
-- Data Points: {stats['count']}{outlier_info}{breach_info}
+STATISTICAL PROFILE:
+- Mean: {stats['mean']:.4f} | Median: {stats['median']:.4f}
+- Std Deviation: {stats['std']:.4f} | Coefficient of Variation: {stats['std']/abs(stats['mean']):.2%}
+- Range: [{stats['min']:.4f}, {stats['max']:.4f}] | Spread: {stats['max'] - stats['min']:.4f}
+- Sample Size: {stats['count']} observations{outlier_info}{breach_info}
 
-Please provide:
-1. Overall trend analysis for the period shown
-2. Volatility observations based on the standard deviation
-3. Analysis of any outliers and what they might indicate
-4. Assessment of limit breaches (if any) and their significance
-5. Key insights about the risk metric's behavior
-6. Risk implications and notable patterns
+ANALYSIS FRAMEWORK:
 
-Keep the analysis concise but informative (3-4 paragraphs)."""
+1. VISUAL PATTERN RECOGNITION (2-3 sentences)
+   - Describe the dominant trend (upward/downward/mean-reverting/volatile)
+   - Note any regime changes, structural breaks, or phase transitions
+   - Identify clustering patterns or periodicity
+
+2. STATISTICAL SIGNIFICANCE (2-3 sentences)
+   - Interpret volatility level (std dev relative to mean) and what it reveals about risk-taking behavior
+   - Analyze the mean-median relationship (distribution skewness implications)
+   - Assess outliers: are they isolated shocks or symptomatic of systemic issues?
+
+3. BUSINESS CONTEXT & DESK BEHAVIOR (3-4 sentences)
+   - What trading activities or market conditions likely drove the observed patterns?
+   - Explain limit breaches (if any): Were they justified tactical positions or control failures?
+   - Infer portfolio composition assumptions (directional bias, leverage, concentration)
+   - Connect patterns to typical desk strategies (e.g., momentum trading, volatility harvesting, carry strategies)
+
+4. RISK IMPLICATIONS & FORWARD-LOOKING ASSESSMENT (2-3 sentences)
+   - Key risks this metric reveals about current portfolio positioning
+   - Whether observed behavior aligns with risk appetite and mandate
+   - Recommended monitoring focus or risk mitigants
+
+DELIVERY REQUIREMENTS:
+- Use domain-specific terminology (drawdowns, convexity, tail risk, Greeks, etc. as appropriate)
+- Support interpretations with the statistical evidence provided
+- Maintain objectivity while providing actionable insights
+- Total length: 3-4 concise paragraphs (10-15 sentences maximum)
+- Prioritize signal over noise—focus on material observations only
+"""
 
     return text_content
 
@@ -86,27 +106,82 @@ def create_portfolio_summary_prompt(metrics_analyses: List[dict]) -> str:
 
     all_metrics_xml = "\n".join(metrics_xml_blocks)
 
-    prompt = f"""You are a risk analyst tasked with providing a comprehensive portfolio-level risk assessment based on individual risk metric analyses.
+    prompt = f"""
 
-<analysis_data>
+You are the Chief Risk Officer conducting a comprehensive portfolio risk review. Your task is to synthesize individual risk metric analyses into a cohesive assessment of the desk's risk profile, trading behavior, and control environment.
+
+<individual_metric_analyses>
 {all_metrics_xml}
-</analysis_data>
+</individual_metric_analyses>
 
-Based on the above data for {len(metrics_analyses)} risk metric(s), please provide a comprehensive risk portfolio summary that includes:
+SYNTHESIS REQUIREMENTS:
 
-1. **Overall Risk Profile**: Analyze the collective behavior of these risk metrics during the analyzed period. What is the overall risk exposure?
+Your analysis must move beyond summarizing individual metrics to provide integrated business intelligence. Apply the following analytical framework:
 
-2. **Comparative Risk Assessment**: Compare and contrast the different risk metrics. Which metrics showed the highest volatility? Which are most concerning?
+1. DESK RISK NARRATIVE (1 paragraph, 4-5 sentences)
+   
+   Construct a coherent story of desk activities during this period by connecting patterns across metrics:
+   - What is the PRIMARY risk-taking strategy evidenced by the collective metric behavior?
+   - Identify the desk's risk appetite posture: defensive, opportunistic, aggressive, or unstable
+   - Highlight any TEMPORAL PATTERNS: Did risk increase/decrease over time? Any regime shifts?
+   - Connect metric patterns to probable market conditions or trading decisions
 
-3. **Limit Breach Analysis**: Assess the significance of any limit breaches across metrics. Are there systematic issues or isolated incidents?
+2. CROSS-METRIC RISK INTELLIGENCE (1 paragraph, 4-5 sentences)
+   
+   Synthesize relationships and dependencies between metrics:
+   - Identify CONFIRMING signals (metrics telling the same risk story)
+   - Flag CONFLICTING signals (metrics showing contradictory patterns—this is critical)
+   - Assess concentration vs. diversification: Are risks clustered or spread?
+   - Determine if outliers/breaches occurred SIMULTANEOUSLY across metrics (systemic event) or independently
+   - Calculate implied portfolio characteristics (e.g., directional bias, leverage, liquidity profile)
 
-4. **Correlation and Dependencies**: Identify any potential correlations or dependencies between risk metrics that could indicate systemic risks.
 
-5. **Key Risk Indicators**: Highlight the 3-5 most critical risk indicators that require immediate attention or monitoring.
+3. CONTROL ENVIRONMENT ASSESSMENT (1 paragraph, 3-4 sentences)
+   
+   Evaluate the risk management and control framework effectiveness:
+   - Are limit breaches isolated incidents or evidence of systematic control failures?
+   - Quality of risk-taking: calculated tactical positions vs. excessive/unmanaged exposures?
+   - Assess whether observed volatility is WITHIN mandate expectations or problematic
+   - Any evidence of "gaming" behavior (e.g., limit breaches at period-end, window dressing)?
 
-6. **Risk Mitigation Recommendations**: Provide actionable insights for risk management and mitigation strategies.
 
-Please structure your response in clear sections and keep it concise yet comprehensive (4-6 paragraphs total). Focus on synthesizing the information to provide strategic risk insights."""
+4. MATERIAL RISK CONCERNS & ANOMALIES (Bullet list, 3-5 items)
+   
+   Flag specific issues requiring immediate escalation or investigation:
+   - Prioritize by MATERIALITY and URGENCY, not just statistical significance
+   - For each concern, state: What is it? Why does it matter? What's the potential impact?
+   - Include "red flags" that may indicate deeper issues (e.g., concealed losses, rogue activity)
+   - Note any MISSING expected patterns (sometimes what's absent is revealing)
+
+
+5. FORWARD-LOOKING RISK POSTURE (1 paragraph, 3-4 sentences)
+   
+   Provide actionable intelligence for ongoing risk management:
+   - Based on current patterns, what are the TOP 2-3 emerging risks?
+   - Recommended monitoring intensity and focus areas
+   - Suggested risk mitigants or position adjustments
+   - Overall risk rating: GREEN (controlled) / AMBER (requires attention) / RED (critical concern)
+
+
+CRITICAL GUIDELINES:
+
+✓ SYNTHESIZE, don't summarize: Connect dots across metrics to reveal the bigger picture
+✓ Apply BUSINESS LOGIC: Every observation must relate to trading strategy or risk management
+✓ Be SPECIFIC: Reference actual metric names, statistics, and patterns from the data
+✓ Prioritize MATERIALITY: Focus on what truly matters for risk decisions
+✓ Maintain OBJECTIVITY: Support conclusions with evidence, avoid speculation
+✓ Use PROFESSIONAL LANGUAGE: This is for senior management and risk committees
+
+✗ Do NOT simply list each metric's findings sequentially
+✗ Do NOT use generic risk management platitudes
+✗ Do NOT ignore conflicting signals or anomalies
+✗ Do NOT exceed the specified paragraph lengths
+
+DELIVERABLE FORMAT:
+- Section headers as specified above
+- Total length: 4-5 paragraphs + 1 bullet list (approximately 400-500 words)
+- Executive-ready: clear, concise, actionable
+"""
 
     return prompt
 

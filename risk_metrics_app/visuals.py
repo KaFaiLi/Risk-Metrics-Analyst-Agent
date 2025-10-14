@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 from .config import OUTPUT_DIR, logger
+from .metrics import VALUE_DATE_COLUMN
 
 
 def create_plotly_chart(
@@ -22,7 +23,7 @@ def create_plotly_chart(
 
     fig.add_trace(
         go.Scatter(
-            x=df["ValueDate"],
+            x=df[VALUE_DATE_COLUMN],
             y=df[metric_name],
             mode="lines",
             name=f"{metric_name}",
@@ -32,7 +33,7 @@ def create_plotly_chart(
 
     fig.add_trace(
         go.Scatter(
-            x=df["ValueDate"],
+            x=df[VALUE_DATE_COLUMN],
             y=[stats["mean"]] * len(df),
             mode="lines",
             name=f"Mean ({stats['mean']:.4f})",
@@ -42,7 +43,7 @@ def create_plotly_chart(
 
     fig.add_trace(
         go.Scatter(
-            x=df["ValueDate"],
+            x=df[VALUE_DATE_COLUMN],
             y=[stats["median"]] * len(df),
             mode="lines",
             name=f"Median ({stats['median']:.4f})",
@@ -53,7 +54,7 @@ def create_plotly_chart(
     if max_limit is not None and not max_limit.isna().all():
         fig.add_trace(
             go.Scatter(
-                x=df["ValueDate"],
+                x=df[VALUE_DATE_COLUMN],
                 y=max_limit,
                 mode="lines",
                 name="Max Limit",
@@ -64,7 +65,7 @@ def create_plotly_chart(
     if min_limit is not None and not min_limit.isna().all():
         fig.add_trace(
             go.Scatter(
-                x=df["ValueDate"],
+                x=df[VALUE_DATE_COLUMN],
                 y=min_limit,
                 mode="lines",
                 name="Min Limit",
@@ -73,7 +74,7 @@ def create_plotly_chart(
         )
 
     if len(outliers) > 0:
-        outlier_dates = df[df[metric_name].isin(outliers)]["ValueDate"]
+        outlier_dates = df.loc[outliers.index, VALUE_DATE_COLUMN]
         fig.add_trace(
             go.Scatter(
                 x=outlier_dates,

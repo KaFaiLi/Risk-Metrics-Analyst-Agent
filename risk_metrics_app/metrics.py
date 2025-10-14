@@ -122,7 +122,7 @@ def check_limit_breaches(
     if max_limit is not None:
         max_breaches = df[df[metric_name] > max_limit]
         if not max_breaches.empty:
-            breach_dates = max_breaches["ValueDate"].dt.strftime("%Y-%m-%d").tolist()
+            breach_dates = max_breaches[VALUE_DATE_COLUMN].dt.strftime("%Y-%m-%d").tolist()
             breaches.append(
                 {
                     "type": "max",
@@ -133,7 +133,7 @@ def check_limit_breaches(
     if min_limit is not None:
         min_breaches = df[df[metric_name] < min_limit]
         if not min_breaches.empty:
-            breach_dates = min_breaches["ValueDate"].dt.strftime("%Y-%m-%d").tolist()
+            breach_dates = min_breaches[VALUE_DATE_COLUMN].dt.strftime("%Y-%m-%d").tolist()
             breaches.append(
                 {
                     "type": "min",
@@ -147,6 +147,9 @@ def check_limit_breaches(
 
 __all__ = [
     "PRIORITY_METRICS",
+    "LIMIT_MAX_SUFFIX",
+    "LIMIT_MIN_SUFFIX",
+    "VALUE_DATE_COLUMN",
     "calculate_statistics",
     "check_limit_breaches",
     "get_maturity_order",

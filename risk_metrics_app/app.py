@@ -7,7 +7,14 @@ import streamlit as st
 
 from .config import logger
 from .llm import LLMRequest, get_portfolio_summary, process_llm_requests, run_async_task
-from .metrics import calculate_statistics, check_limit_breaches, organize_metrics
+from .metrics import (
+    LIMIT_MAX_SUFFIX,
+    LIMIT_MIN_SUFFIX,
+    VALUE_DATE_COLUMN,
+    calculate_statistics,
+    check_limit_breaches,
+    organize_metrics,
+)
 from .prompts import create_llm_prompt
 from .reporting import create_export_package, create_html_report
 from .visuals import create_plotly_chart, save_and_encode_image
@@ -290,9 +297,14 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
 
     try:
         df = pd.read_csv(uploaded_file)
+        df.columns = [col.lower() for col in df.columns]
         logger.info("Loaded data frame from %s with shape %s", uploaded_file.name, df.shape)
 
-        df["ValueDate"] = pd.to_datetime(df["ValueDate"])
+        if VALUE_DATE_COLUMN not in df.columns:
+            st.error("⚠️ The uploaded file is missing the required 'ValueDate' column.")
+            return
+
+        df[VALUE_DATE_COLUMN] = pd.to_datetime(df[VALUE_DATE_COLUMN])
 
         ordered_metrics = organize_metrics(df)
         logger.info("Organized %s metric(s)", len(ordered_metrics))
@@ -305,8 +317,8 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
             logger.info("Processing metric %s (%s/%s)", metric, idx + 1, len(ordered_metrics))
             st.header(f"📊 {metric} Analysis")
 
-            max_limit_col = f"{metric}_limMaxValue"
-            min_limit_col = f"{metric}_limMinValue"
+            max_limit_col = f"{metric}{LIMIT_MAX_SUFFIX}"
+            min_limit_col = f"{metric}{LIMIT_MIN_SUFFIX}"
             max_limit = df[max_limit_col] if max_limit_col in df.columns else None
             min_limit = df[min_limit_col] if min_limit_col in df.columns else None
 
@@ -328,7 +340,7 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
 
             outlier_dates = []
             if len(outliers) > 0:
-                outlier_dates = df.loc[outliers.index, "ValueDate"].dt.strftime("%Y-%m-%d").tolist()
+                outlier_dates = df.loc[outliers.index, VALUE_DATE_COLUMN].dt.strftime("%Y-%m-%d").tolist()
                 st.info(
                     "🔍 Detected {} outlier(s) (±2 SD from mean) on {}".format(
                         len(outliers), ", ".join(outlier_dates)
