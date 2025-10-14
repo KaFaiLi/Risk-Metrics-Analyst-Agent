@@ -28,6 +28,8 @@ def initialize_session_state() -> None:
     st.session_state.setdefault("extraction_result", None)
     st.session_state.setdefault("extraction_username", "")
     st.session_state.setdefault("extraction_perimeter_raw", "")
+    st.session_state.setdefault("extraction_start_date", None)
+    st.session_state.setdefault("extraction_end_date", None)
 
 
 def reset_analysis_state() -> None:
@@ -184,6 +186,9 @@ def render_extraction_tab() -> None:
         """
         Use this tool to fetch fresh risk metrics from the internal API proxy. Supply your credentials and a
         comma-separated list of perimeters to generate a CSV file saved locally for later analysis.
+        
+        **Date Range:** Optionally specify start and end dates to control the date range of extracted data.
+        If dates are not provided, the system will use default behavior (current date minus days based on perimeter count).
         """
     )
 
@@ -203,16 +208,40 @@ def render_extraction_tab() -> None:
             value=st.session_state.get("extraction_perimeter_raw", ""),
             help="Provide one or more perimeters separated by commas, e.g. FrontOffice,London,Equities.",
         )
+        
+        # Date range inputs
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                value=st.session_state.get("extraction_start_date"),
+                help="Start date for the data extraction (optional - leave empty to use default behavior).",
+            )
+        with col2:
+            end_date = st.date_input(
+                "End Date",
+                value=st.session_state.get("extraction_end_date"),
+                help="End date for the data extraction (optional - leave empty to use default behavior).",
+            )
+        
         submitted = st.form_submit_button("📥 Fetch Data", use_container_width=True)
 
     if submitted:
         st.session_state.extraction_username = username
         st.session_state.extraction_perimeter_raw = perimeter_raw
+        st.session_state.extraction_start_date = start_date
+        st.session_state.extraction_end_date = end_date
         perimeters = parse_perimeter_input(perimeter_raw)
+        
+        # Convert date objects to datetime if provided
+        start_datetime = datetime.combine(start_date, datetime.min.time()) if start_date else None
+        end_datetime = datetime.combine(end_date, datetime.min.time()) if end_date else None
 
         try:
             with st.spinner("Requesting API and saving CSV..."):
-                _, payload = extract_data_via_proxy(username, password, perimeters)
+                _, payload = extract_data_via_proxy(
+                    username, password, perimeters, start_date=start_datetime, end_date=end_datetime
+                )
             st.session_state.extraction_result = payload
             st.success("✅ Data extracted successfully.")
         except ValueError as error:
@@ -234,6 +263,8 @@ def render_extraction_tab() -> None:
                 "row_count": result["row_count"],
                 "password_checksum": result["password_checksum"],
                 "generated_at": result["generated_at"],
+                "start_date": result.get("start_date"),
+                "end_date": result.get("end_date"),
             }
         )
 
