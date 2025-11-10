@@ -32,6 +32,8 @@ def initialize_session_state() -> None:
     st.session_state.setdefault("portfolio_summary", None)
     st.session_state.setdefault("analysis_completed", False)
     st.session_state.setdefault("uploaded_file_name", None)
+    st.session_state.setdefault("use_llm", True)
+    st.session_state.setdefault("analysis_use_llm", None)
     st.session_state.setdefault("extraction_result", None)
     st.session_state.setdefault("extraction_username", "")
     st.session_state.setdefault("extraction_perimeter_raw", "")
@@ -45,6 +47,7 @@ def reset_analysis_state() -> None:
     st.session_state.portfolio_summary = None
     st.session_state.analysis_completed = False
     st.session_state.uploaded_file_name = None
+    st.session_state.analysis_use_llm = None
 
 
 def render_sidebar() -> tuple[Optional[str], Optional[Any], bool]:
@@ -52,14 +55,25 @@ def render_sidebar() -> tuple[Optional[str], Optional[Any], bool]:
     with st.sidebar:
         st.header("⚙️ Configuration")
 
-        api_key = st.text_input(
-            "Google API Key",
-            type="password",
-            help="Enter your Google API key for Gemini AI analysis",
+        use_llm = st.checkbox(
+            "Enable AI-generated insights",
+            value=st.session_state.get("use_llm", True),
+            help="Toggle Google Gemini commentary. Disable to generate charts only.",
         )
+        st.session_state.use_llm = use_llm
 
-        if api_key:
-            os.environ["GOOGLE_API_KEY"] = api_key
+        api_key: Optional[str] = None
+        if use_llm:
+            api_key = st.text_input(
+                "Google API Key",
+                type="password",
+                help="Enter your Google API key for Gemini AI analysis",
+            )
+
+            if api_key:
+                os.environ["GOOGLE_API_KEY"] = api_key
+        else:
+            st.info("AI insights disabled. Only statistics and charts will be generated.")
 
         st.divider()
 
@@ -78,7 +92,7 @@ def render_sidebar() -> tuple[Optional[str], Optional[Any], bool]:
                 reset_analysis_state()
                 st.rerun()
 
-    return api_key, uploaded_file, analyze_button
+    return api_key, uploaded_file, analyze_button, use_llm
 
 
 def display_welcome_panel() -> None:
@@ -88,9 +102,9 @@ def display_welcome_panel() -> None:
     st.markdown(
         """
     ### How to use:
-    1. **Enter your Google API Key** in the sidebar (required for AI analysis)
+    1. **Enter your Google API Key** in the sidebar if you want AI commentary (optional)
     2. **Upload a CSV file** containing risk metrics data
-    3. **Click 'Analyze Risk Metrics'** to generate charts and AI insights
+    3. **Click 'Analyze Risk Metrics'** to generate charts and optional AI insights
 
     ### CSV File Format:
     Your CSV file should include:
@@ -108,7 +122,7 @@ def display_welcome_panel() -> None:
     - 📊 Mean, median, and ±2 standard deviation analysis
     - 🔍 Automatic outlier detection
     - ⚠️ Limit breach identification
-    - 🤖 AI-powered risk analysis using Google Gemini
+    - 🤖 Optional AI-powered risk analysis using Google Gemini
     - 📉 Support for multiple risk metrics simultaneously
     - 📥 Export to HTML and ZIP package
 
@@ -142,6 +156,8 @@ def render_export_options() -> None:
     st.divider()
     st.header("📥 Export Results")
 
+    use_llm = st.session_state.get("analysis_use_llm", st.session_state.get("use_llm", True))
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -149,6 +165,7 @@ def render_export_options() -> None:
             st.session_state.metrics_analyses,
             st.session_state.portfolio_summary,
             st.session_state.uploaded_file_name,
+            use_llm,
         )
         st.download_button(
             label="📄 Download HTML Report",
@@ -164,6 +181,7 @@ def render_export_options() -> None:
             st.session_state.metrics_analyses,
             st.session_state.portfolio_summary,
             st.session_state.uploaded_file_name,
+            use_llm,
         )
         st.download_button(
             label="📦 Download Complete Package (ZIP)",
@@ -177,7 +195,7 @@ def render_export_options() -> None:
     st.info(
         """
     **Export Options:**
-    - **HTML Report**: Single file with interactive charts and all insights
+    - **HTML Report**: Single file with interactive charts and (when enabled) AI commentary
     - **Complete Package**: ZIP file containing HTML report, chart images (PNG), and text summary
 
     💡 **Tip**: Your results are saved in this session. You can download multiple times or start a new analysis using the button in the sidebar.
@@ -283,9 +301,9 @@ def render_extraction_tab() -> None:
             st.warning("The saved CSV could not be found at the reported path. It may have been moved or deleted.")
 
 
-def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
+def handle_analysis(api_key: Optional[str], uploaded_file, use_llm: bool) -> None:
     """Execute the risk metric analysis workflow."""
-    if not api_key:
+    if use_llm and not api_key:
         st.error("⚠️ Please enter your Google API Key in the sidebar to enable AI analysis.")
         return
     if uploaded_file is None:
@@ -294,6 +312,7 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
 
     reset_analysis_state()
     st.session_state.uploaded_file_name = uploaded_file.name
+    st.session_state.analysis_use_llm = use_llm
 
     try:
         df = pd.read_csv(uploaded_file)
@@ -358,33 +377,32 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
                 fig = create_plotly_chart(df, metric, stats, outliers, max_limit, min_limit)
                 st.plotly_chart(fig, use_container_width=True)
 
-            img_base64 = save_and_encode_image(fig, metric)
             has_limits = (max_limit is not None) or (min_limit is not None)
-            prompt_text = create_llm_prompt(metric, stats, outliers, breaches, has_limits)
+            insights_placeholder = None
+            insights_value: Optional[str] = None
+            should_request_llm = False
 
-            st.subheader("🤖 AI-Generated Insights")
-            insights_placeholder = st.empty()
+            if use_llm:
+                st.subheader("🤖 AI-Generated Insights")
+                insights_placeholder = st.empty()
 
-            valid_count = metric_series.count()
-            zero_ratio = (metric_series == 0).sum() / valid_count if valid_count else 0.0
-            skip_llm = zero_ratio >= 0.95
-            if skip_llm:
-                logger.info(
-                    "Skipping LLM analysis for %s due to low exposure (zero ratio %.2f)",
-                    metric,
-                    zero_ratio,
-                )
-                insight_text = "Low exposure, no insight"
-                insights_placeholder.markdown(
-                    f"""
-                    <div style=\"background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 4px solid #6c757d;\">
-                        {insight_text}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                valid_count = metric_series.count()
+                zero_ratio = (metric_series == 0).sum() / valid_count if valid_count else 0.0
+                if not valid_count or zero_ratio >= 0.95:
+                    logger.info(
+                        "Skipping LLM analysis for %s due to low exposure (zero ratio %.2f)",
+                        metric,
+                        zero_ratio,
+                    )
+                    insight_text = "Low exposure, no insight"
+                    with insights_placeholder.container(border=True):
+                        st.write(insight_text)
+                    insights_value = insight_text
+                else:
+                    insights_placeholder.info("🤖 Generating AI insights...")
+                    should_request_llm = True
             else:
-                insights_placeholder.info("🤖 Generating AI insights...")
+                insights_value = "AI analysis disabled for this run."
 
             metrics_analyses.append(
                 {
@@ -393,26 +411,30 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
                     "outliers": outliers,
                     "outlier_dates": outlier_dates,
                     "breaches": breaches,
-                    "insights": "Low exposure, no insight" if skip_llm else None,
+                    "insights": insights_value,
                     "fig": fig,
                 }
             )
 
-            if not skip_llm:
+            analysis_index = len(metrics_analyses) - 1
+
+            if use_llm and should_request_llm and insights_placeholder is not None:
+                img_base64 = save_and_encode_image(fig, metric)
+                prompt_text = create_llm_prompt(metric, stats, outliers, breaches, has_limits)
                 llm_requests.append(
                     {
                         "metric": metric,
                         "prompt_text": prompt_text,
                         "img_base64": img_base64,
                         "placeholder": insights_placeholder,
-                        "analysis_index": len(metrics_analyses) - 1,
+                        "analysis_index": analysis_index,
                     }
                 )
 
             if idx < len(ordered_metrics) - 1:
                 st.divider()
 
-        if llm_requests:
+        if use_llm and llm_requests:
             with st.spinner("Generating AI insights..."):
                 llm_results = run_async_task(process_llm_requests(llm_requests))
                 logger.info("Received %s AI insight response(s)", len(llm_results))
@@ -424,20 +446,15 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
                     placeholder.error(insight)
                 else:
                     logger.info("AI insight generation succeeded for %s", request["metric"])
-                    placeholder.markdown(
-                        f"""
-                        <div style=\"background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 4px solid #1f77b4;\">
-                            {insight.replace(chr(10), '<br><br>')}
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                    with placeholder.container(border=True):
+                        st.write(insight)
 
                 metrics_analyses[request["analysis_index"]]["insights"] = insight
 
         st.session_state.metrics_analyses = metrics_analyses
+        st.session_state.portfolio_summary = None
 
-        if len(metrics_analyses) > 1:
+        if use_llm and len(metrics_analyses) > 1:
             st.divider()
             st.header("📋 Risk Portfolio Summary")
             st.markdown("*Comprehensive risk analysis across all metrics*")
@@ -449,19 +466,15 @@ def handle_analysis(api_key: Optional[str], uploaded_file) -> None:
                 else:
                     logger.info("Portfolio summary generation succeeded")
 
-            st.markdown(
-                f"""
-                <div style=\"background-color: #e8f4f8; padding: 25px; border-radius: 10px; border-left: 5px solid #0066cc;\">
-                    <h3 style=\"margin-top: 0; color: #0066cc;\">🎯 Strategic Risk Assessment</h3>
-                    {portfolio_summary.replace(chr(10), '<br><br>')}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            with st.container(border=True):
+                st.subheader("🎯 Strategic Risk Assessment")
+                st.write(portfolio_summary)
 
             st.session_state.portfolio_summary = portfolio_summary
 
         st.session_state.analysis_completed = True
+        if not use_llm:
+            st.info("AI insights were disabled for this analysis. Charts and exports include statistics and visualizations only.")
         st.success("✅ Analysis complete!")
         logger.info("Analysis completed successfully for %s", uploaded_file.name)
 
@@ -476,13 +489,13 @@ def run_app() -> None:
     setup_page()
     initialize_session_state()
 
-    api_key, uploaded_file, analyze_button = render_sidebar()
+    api_key, uploaded_file, analyze_button, use_llm = render_sidebar()
 
     analysis_tab, extraction_tab = st.tabs(["Risk Metrics Analysis", "API Extraction"])
 
     with analysis_tab:
         if analyze_button:
-            handle_analysis(api_key, uploaded_file)
+            handle_analysis(api_key, uploaded_file, use_llm)
         elif not st.session_state.analysis_completed:
             display_welcome_panel()
 
