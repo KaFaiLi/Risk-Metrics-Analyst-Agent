@@ -39,6 +39,23 @@ def initialize_session_state() -> None:
     st.session_state.setdefault("extraction_perimeter_raw", "")
     st.session_state.setdefault("extraction_start_date", None)
     st.session_state.setdefault("extraction_end_date", None)
+    st.session_state.setdefault("filter_metrics_without_limits", False)
+
+
+def metric_has_meaningful_limits(df: pd.DataFrame, metric: str) -> bool:
+    """Return True if at least one limit column contains non-zero, non-null values."""
+
+    def _series_has_limits(column_name: str) -> bool:
+        if column_name not in df.columns:
+            return False
+        numeric = pd.to_numeric(df[column_name], errors="coerce").dropna()
+        if numeric.empty:
+            return False
+        return not (numeric == 0).all()
+
+    max_col = f"{metric}{LIMIT_MAX_SUFFIX}"
+    min_col = f"{metric}{LIMIT_MIN_SUFFIX}"
+    return _series_has_limits(max_col) or _series_has_limits(min_col)
 
 
 def reset_analysis_state() -> None:
@@ -50,7 +67,7 @@ def reset_analysis_state() -> None:
     st.session_state.analysis_use_llm = None
 
 
-def render_sidebar() -> tuple[Optional[str], Optional[Any], bool]:
+def render_sidebar() -> tuple[Optional[str], Optional[Any], bool, bool, bool]:
     """Render sidebar controls and return core inputs."""
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -77,6 +94,15 @@ def render_sidebar() -> tuple[Optional[str], Optional[Any], bool]:
 
         st.divider()
 
+        filter_metrics_without_limits = st.checkbox(
+            "Hide metrics without limits",
+            value=st.session_state.get("filter_metrics_without_limits", False),
+            help="Exclude risk metrics where both max and min limit columns are empty or zero.",
+        )
+        st.session_state.filter_metrics_without_limits = filter_metrics_without_limits
+
+        st.divider()
+
         st.subheader("📁 Upload Data")
         uploaded_file = st.file_uploader(
             "Upload CSV file",
@@ -92,7 +118,7 @@ def render_sidebar() -> tuple[Optional[str], Optional[Any], bool]:
                 reset_analysis_state()
                 st.rerun()
 
-    return api_key, uploaded_file, analyze_button, use_llm
+    return api_key, uploaded_file, analyze_button, use_llm, filter_metrics_without_limits
 
 
 def display_welcome_panel() -> None:
@@ -301,7 +327,12 @@ def render_extraction_tab() -> None:
             st.warning("The saved CSV could not be found at the reported path. It may have been moved or deleted.")
 
 
-def handle_analysis(api_key: Optional[str], uploaded_file, use_llm: bool) -> None:
+def handle_analysis(
+    api_key: Optional[str],
+    uploaded_file,
+    use_llm: bool,
+    filter_metrics_without_limits: bool,
+) -> None:
     """Execute the risk metric analysis workflow."""
     if use_llm and not api_key:
         st.error("⚠️ Please enter your Google API Key in the sidebar to enable AI analysis.")
@@ -326,7 +357,22 @@ def handle_analysis(api_key: Optional[str], uploaded_file, use_llm: bool) -> Non
         df[VALUE_DATE_COLUMN] = pd.to_datetime(df[VALUE_DATE_COLUMN])
 
         ordered_metrics = organize_metrics(df)
-        logger.info("Organized %s metric(s)", len(ordered_metrics))
+        initial_metric_count = len(ordered_metrics)
+        logger.info("Organized %s metric(s)", initial_metric_count)
+
+        if filter_metrics_without_limits:
+            filtered_metrics = [metric for metric in ordered_metrics if metric_has_meaningful_limits(df, metric)]
+            filtered_out = initial_metric_count - len(filtered_metrics)
+            if filtered_out > 0:
+                st.info(f"Filtered out {filtered_out} metric(s) without limit values.")
+                logger.info("Filtered out %s metric(s) without limits", filtered_out)
+            ordered_metrics = filtered_metrics
+
+        if not ordered_metrics:
+            st.warning("No risk metrics available after applying the limit filter.")
+            logger.warning("No metrics available after applying limit filter")
+            return
+
         st.success(f"✅ Loaded {len(df)} rows with {len(ordered_metrics)} risk metrics")
 
         metrics_analyses = []
@@ -489,13 +535,13 @@ def run_app() -> None:
     setup_page()
     initialize_session_state()
 
-    api_key, uploaded_file, analyze_button, use_llm = render_sidebar()
+    api_key, uploaded_file, analyze_button, use_llm, filter_metrics_without_limits = render_sidebar()
 
     analysis_tab, extraction_tab = st.tabs(["Risk Metrics Analysis", "API Extraction"])
 
     with analysis_tab:
         if analyze_button:
-            handle_analysis(api_key, uploaded_file, use_llm)
+            handle_analysis(api_key, uploaded_file, use_llm, filter_metrics_without_limits)
         elif not st.session_state.analysis_completed:
             display_welcome_panel()
 
