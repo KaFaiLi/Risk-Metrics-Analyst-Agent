@@ -11,6 +11,16 @@ def make_anchor_id(metric: str) -> str:
     """
     Generate a safe HTML anchor ID from a metric name.
     
+    This function ensures valid HTML IDs by converting metric names to lowercase,
+    replacing special characters (including brackets, spaces, slashes) with dashes,
+    and adding a "metric-" prefix to avoid collisions and ensure IDs don't start with numbers.
+    
+    Args:
+        metric: The metric name which may contain special characters
+        
+    Returns:
+        A valid HTML anchor ID string
+    
     Examples:
         "VaR" -> "metric-var"
         "BasisSensiByCurrencyByPillar[EUR][1W]" -> "metric-basissensibycurrencybypillar-eur-1w"
@@ -206,7 +216,7 @@ def create_html_report(
                 background-color: #fafafa;
                 border-radius: 8px;
                 border-left: 5px solid #1f77b4;
-                scroll-margin-top: 80px;
+                scroll-margin-top: 80px;  /* Space for smooth anchor scrolling */
             }}
             .metric-section h2 {{
                 color: #1f77b4;
@@ -320,8 +330,13 @@ def create_html_report(
                 list-style-type: none;
                 padding-left: 0;
                 margin: 0;
-                column-count: 2;
+                column-count: 2;  /* Two columns for better space utilization on desktop */
                 column-gap: 20px;
+            }}
+            @media (max-width: 768px) {{
+                .toc ul {{
+                    column-count: 1;  /* Single column on mobile devices */
+                }}
             }}
             .toc li {{
                 margin: 8px 0;
