@@ -2,18 +2,56 @@ from datetime import datetime
 from io import BytesIO
 from typing import List
 import zipfile
+import re
 
 import plotly.io as pio
+
+
+def make_anchor_id(metric: str) -> str:
+    """
+    Generate a safe HTML anchor ID from a metric name.
+    
+    Examples:
+        "VaR" -> "metric-var"
+        "BasisSensiByCurrencyByPillar[EUR][1W]" -> "metric-basissensibycurrencybypillar-eur-1w"
+    """
+    # Convert to lowercase
+    anchor = metric.lower()
+    # Replace non-alphanumeric characters with dash
+    anchor = re.sub(r'[^a-z0-9]+', '-', anchor)
+    # Collapse repeated dashes
+    anchor = re.sub(r'-+', '-', anchor)
+    # Trim leading/trailing dashes
+    anchor = anchor.strip('-')
+    # Prefix to avoid collisions and ensure valid ID
+    return f"metric-{anchor}"
 
 
 def create_html_report(
     metrics_analyses: List[dict], portfolio_summary: str, file_name: str, use_llm: bool
 ) -> str:
     """Create a comprehensive HTML report for the risk analysis."""
+    # Build Table of Contents HTML
+    toc_items = []
+    for analysis in metrics_analyses:
+        metric = analysis["metric"]
+        anchor_id = make_anchor_id(metric)
+        toc_items.append(f'<li><a href="#{anchor_id}">{metric}</a></li>')
+    
+    toc_html = f"""
+    <div class="toc" id="top">
+        <h2>🧭 Graph Index</h2>
+        <ul>
+            {''.join(toc_items)}
+        </ul>
+    </div>
+    """
+    
     metric_sections = []
 
     for analysis in metrics_analyses:
         metric = analysis["metric"]
+        anchor_id = make_anchor_id(metric)
         stats = analysis["stats"]
         outliers = analysis["outliers"]
         outlier_dates = analysis.get("outlier_dates", [])
@@ -67,8 +105,9 @@ def create_html_report(
             """
 
         metric_section = f"""
-        <div class="metric-section">
+        <div class="metric-section" id="{anchor_id}">
             <h2>📊 {metric} Analysis</h2>
+            <a href="#top" class="back-to-index">⬆ Back to index</a>
             
             <div class="stats-grid">
                 <div class="stat-card">
@@ -167,6 +206,7 @@ def create_html_report(
                 background-color: #fafafa;
                 border-radius: 8px;
                 border-left: 5px solid #1f77b4;
+                scroll-margin-top: 80px;
             }}
             .metric-section h2 {{
                 color: #1f77b4;
@@ -264,6 +304,51 @@ def create_html_report(
                 color: #888;
                 font-size: 14px;
             }}
+            .toc {{
+                margin: 30px 0;
+                padding: 25px;
+                background-color: #f0f8ff;
+                border-radius: 8px;
+                border-left: 4px solid #1f77b4;
+            }}
+            .toc h2 {{
+                color: #1f77b4;
+                margin-top: 0;
+                margin-bottom: 15px;
+            }}
+            .toc ul {{
+                list-style-type: none;
+                padding-left: 0;
+                margin: 0;
+                column-count: 2;
+                column-gap: 20px;
+            }}
+            .toc li {{
+                margin: 8px 0;
+                break-inside: avoid;
+            }}
+            .toc a {{
+                color: #0066cc;
+                text-decoration: none;
+                font-size: 15px;
+                transition: color 0.2s;
+            }}
+            .toc a:hover {{
+                color: #1f77b4;
+                text-decoration: underline;
+            }}
+            .back-to-index {{
+                display: inline-block;
+                margin-bottom: 15px;
+                color: #0066cc;
+                text-decoration: none;
+                font-size: 14px;
+                transition: color 0.2s;
+            }}
+            .back-to-index:hover {{
+                color: #1f77b4;
+                text-decoration: underline;
+            }}
             @media print {{
                 body {{
                     background-color: white;
@@ -279,6 +364,8 @@ def create_html_report(
             <h1>📊 Risk Metrics Analysis Report</h1>
             <p class="subtitle">Source File: {file_name}</p>
             <p class="subtitle">Analyzed Metrics: {', '.join([a['metric'] for a in metrics_analyses])}</p>
+            
+            {toc_html}
             
             {''.join(metric_sections)}
             
