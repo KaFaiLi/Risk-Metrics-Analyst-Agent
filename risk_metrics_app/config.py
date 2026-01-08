@@ -10,6 +10,10 @@ MAX_LLM_CONCURRENCY = 4
 MAX_LLM_ATTEMPTS = 3
 LLM_RETRY_DELAY = 2.0
 
+# Batch processing constants
+NODE_COLUMN = "strananodename"  # Case-insensitive detection target (stored lowercase)
+ADAPTIVE_SCALE_THRESHOLD = 0.10  # Apply adaptive scaling when data occupies <10% of range
+
 
 def setup_logging() -> logging.Logger:
     """Configure and return the application logger."""
@@ -35,6 +39,8 @@ __all__ = [
     "MAX_LLM_CONCURRENCY",
     "MAX_LLM_ATTEMPTS",
     "LLM_RETRY_DELAY",
+    "NODE_COLUMN",
+    "ADAPTIVE_SCALE_THRESHOLD",
     "logger",
     "setup_logging",
 ]

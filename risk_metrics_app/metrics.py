@@ -1,13 +1,93 @@
 import re
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+
+from risk_metrics_app.config import NODE_COLUMN
 
 PRIORITY_METRICS = ["VaR", "SVaR", "STTHH"]
 
 VALUE_DATE_COLUMN = "valuedate"
 LIMIT_MAX_SUFFIX = "_limmaxvalue"
 LIMIT_MIN_SUFFIX = "_limminvalue"
+
+
+@dataclass
+class InterpolatedSeries:
+    """Container for interpolated time series data.
+    
+    Attributes:
+        display: Interpolated series for chart rendering (fills gaps).
+        original: Original series with NaN preserved for accurate statistics.
+    """
+    display: pd.Series
+    original: pd.Series
+
+
+def detect_node_column(df: pd.DataFrame) -> Optional[str]:
+    """Detect the stranaNodeName column in a case-insensitive manner.
+    
+    Args:
+        df: DataFrame to search for node column.
+        
+    Returns:
+        The actual column name if found, None otherwise.
+    """
+    for col in df.columns:
+        if col.lower() == NODE_COLUMN:
+            return col
+    return None
+
+
+def split_by_node(df: pd.DataFrame, node_column: str) -> Dict[str, pd.DataFrame]:
+    """Split DataFrame into separate DataFrames by unique node values.
+    
+    Args:
+        df: DataFrame containing the node column.
+        node_column: The name of the column to split by.
+        
+    Returns:
+        Dictionary mapping node names to filtered DataFrames.
+    """
+    result: Dict[str, pd.DataFrame] = {}
+    unique_nodes = df[node_column].dropna().unique()
+    
+    for node in sorted(unique_nodes):
+        node_df = df[df[node_column] == node].copy()
+        # Drop the node column as it's no longer needed after splitting
+        node_df = node_df.drop(columns=[node_column])
+        result[str(node)] = node_df
+    
+    return result
+
+
+def interpolate_for_display(series: pd.Series, date_index: pd.DatetimeIndex) -> InterpolatedSeries:
+    """Interpolate time series to fill systematic gaps for chart display.
+    
+    Uses time-based linear interpolation to fill NaN values while preserving
+    the original series for accurate statistical calculations.
+    
+    Args:
+        series: Original data series with potential NaN gaps.
+        date_index: DatetimeIndex to use for time-based interpolation.
+        
+    Returns:
+        InterpolatedSeries with both display (interpolated) and original data.
+    """
+    # Create a series with datetime index for time-based interpolation
+    indexed_series = pd.Series(series.values, index=date_index)
+    
+    # Apply time-based linear interpolation
+    interpolated = indexed_series.interpolate(method='time')
+    
+    # Convert back to regular index matching original
+    display_series = pd.Series(interpolated.values, index=series.index, name=series.name)
+    
+    return InterpolatedSeries(
+        display=display_series,
+        original=series.copy()
+    )
 
 
 def _strip_limit_suffix(column_name: str) -> str:
@@ -150,9 +230,13 @@ __all__ = [
     "LIMIT_MAX_SUFFIX",
     "LIMIT_MIN_SUFFIX",
     "VALUE_DATE_COLUMN",
+    "InterpolatedSeries",
     "calculate_statistics",
     "check_limit_breaches",
+    "detect_node_column",
     "get_maturity_order",
+    "interpolate_for_display",
     "organize_metrics",
     "parse_metric_name",
+    "split_by_node",
 ]
