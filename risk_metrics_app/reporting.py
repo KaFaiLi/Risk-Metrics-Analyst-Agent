@@ -113,7 +113,7 @@ def create_html_report(
         # Generate limit annotation HTML if adaptive scaling was applied
         limit_annotation_html = ""
         if scale_context is not None and scale_context.needs_adaptive_scaling:
-            limit_annotation_html = create_limit_annotation_html(scale_context)
+            limit_annotation_html = create_limit_annotation_html(scale_context, has_breaches=bool(breaches))
 
         # Outlier alert box
         outlier_html = ""
