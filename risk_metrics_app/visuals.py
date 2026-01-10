@@ -161,11 +161,12 @@ def _build_limit_periods(
     return periods
 
 
-def create_limit_annotation_html(scale_context: ScaleContext) -> str:
+def create_limit_annotation_html(scale_context: ScaleContext, has_breaches: bool = False) -> str:
     """Generate HTML banner showing off-screen limit values grouped by period.
     
     Args:
         scale_context: ScaleContext with limit_periods populated.
+        has_breaches: Whether there are any limit breaches for this metric.
         
     Returns:
         HTML string for the annotation banner.
@@ -173,8 +174,16 @@ def create_limit_annotation_html(scale_context: ScaleContext) -> str:
     if not scale_context.limit_periods:
         return ""
     
+    # Calculate consumption percentage (scale_ratio represents data_range / limit_range)
+    consumption_pct = scale_context.scale_ratio * 100
+    
     lines = ['<div style="background-color: #fff3cd; border: 1px solid #ffc107; '
              'border-radius: 4px; padding: 10px; margin: 10px 0;">']
+    
+    # Add consumption remark if no breaches
+    if not has_breaches:
+        lines.append(f'<strong>✅ Metric consumption is less than {consumption_pct:.1f}% of the limit range with no breaches.</strong><br/>')
+    
     lines.append('<strong>📊 Limit Values (not shown on chart - adaptive scaling applied):</strong>')
     lines.append('<ul style="margin: 5px 0; padding-left: 20px;">')
     

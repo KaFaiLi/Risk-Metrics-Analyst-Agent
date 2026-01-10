@@ -571,6 +571,12 @@ def _process_node_analysis(
         max_limit = df[max_limit_col] if max_limit_col in df.columns else None
         min_limit = df[min_limit_col] if min_limit_col in df.columns else None
 
+        # Forward-fill limits to handle missing days (assumes limit unchanged if not specified)
+        if max_limit is not None:
+            max_limit = max_limit.ffill()
+        if min_limit is not None:
+            min_limit = min_limit.ffill()
+
         metric_series = df[metric]
         stats, outliers = calculate_statistics(metric_series)
         breaches = check_limit_breaches(df, metric, max_limit, min_limit)
@@ -628,7 +634,7 @@ def _process_node_analysis(
 
         # Display limit annotation banner if adaptive scaling was applied
         if use_adaptive and scale_context and scale_context.needs_adaptive_scaling and scale_context.limit_periods:
-            annotation_html = create_limit_annotation_html(scale_context)
+            annotation_html = create_limit_annotation_html(scale_context, has_breaches=bool(breaches))
             st.markdown(annotation_html, unsafe_allow_html=True)
 
         has_limits = (max_limit is not None) or (min_limit is not None)
@@ -763,6 +769,12 @@ def _handle_single_analysis(
         max_limit = df[max_limit_col] if max_limit_col in df.columns else None
         min_limit = df[min_limit_col] if min_limit_col in df.columns else None
 
+        # Forward-fill limits to handle missing days (assumes limit unchanged if not specified)
+        if max_limit is not None:
+            max_limit = max_limit.ffill()
+        if min_limit is not None:
+            min_limit = min_limit.ffill()
+
         metric_series = df[metric]
         stats, outliers = calculate_statistics(metric_series)
         breaches = check_limit_breaches(df, metric, max_limit, min_limit)
@@ -820,7 +832,7 @@ def _handle_single_analysis(
 
         # Display limit annotation banner if adaptive scaling was applied
         if use_adaptive and scale_context and scale_context.needs_adaptive_scaling and scale_context.limit_periods:
-            annotation_html = create_limit_annotation_html(scale_context)
+            annotation_html = create_limit_annotation_html(scale_context, has_breaches=bool(breaches))
             st.markdown(annotation_html, unsafe_allow_html=True)
 
         has_limits = (max_limit is not None) or (min_limit is not None)
