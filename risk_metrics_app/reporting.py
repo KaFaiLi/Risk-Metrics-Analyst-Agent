@@ -537,8 +537,8 @@ def create_html_report(
                 </div>
                 
                 <!-- Navigation Grid (collapsible) -->
-                <div id="navContainer" class="hidden mt-4">
-                    <div id="navGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                <div id="navContainer" class="hidden mt-4 max-h-64 overflow-y-auto">
+                    <div id="navGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 pr-2">
                         {''.join(toc_items)}
                     </div>
                     
