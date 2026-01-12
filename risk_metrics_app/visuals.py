@@ -287,7 +287,7 @@ def create_plotly_chart(
                     y=min_limit,
                     mode="lines",
                     name="Min Limit",
-                    line=dict(color="purple", width=2, dash="dashdot"),
+                    line=dict(color="red", width=2, dash="dashdot"),
                 )
             )
 

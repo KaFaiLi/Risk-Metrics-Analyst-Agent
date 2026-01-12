@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
-from .config import logger
+from .config import logger, MAX_EXCLUSION_KEYWORDS
 from .llm import LLMRequest, get_portfolio_summary, process_llm_requests, run_async_task
 from .metrics import (
     LIMIT_MAX_SUFFIX,
@@ -14,8 +14,11 @@ from .metrics import (
     calculate_statistics,
     check_limit_breaches,
     detect_node_column,
+    filter_metrics_by_keywords,
+    get_metric_columns,
     interpolate_for_display,
     organize_metrics,
+    parse_exclusion_keywords,
     split_by_node,
 )
 from .prompts import create_llm_prompt
@@ -60,6 +63,14 @@ def initialize_session_state() -> None:
     st.session_state.setdefault("scale_contexts", {})  # Dict[str, ScaleContext] - metric -> context
     st.session_state.setdefault("adaptive_scale_toggles", {})  # Dict[str, bool] - metric -> enabled
     st.session_state.setdefault("use_adaptive_scaling", True)  # Global adaptive scaling toggle
+    
+    # Metric exclusion filter state
+    st.session_state.setdefault("exclusion_keywords_raw", "")
+    st.session_state.setdefault("uploaded_file_columns", None)
+    
+    # Excluded metrics tracking for report
+    st.session_state.setdefault("excluded_by_keyword", [])  # List[str] - metrics excluded by keyword filter
+    st.session_state.setdefault("excluded_by_limit", [])  # List[str] - metrics excluded by limit filter
 
 
 def metric_has_meaningful_limits(df: pd.DataFrame, metric: str) -> bool:
@@ -96,6 +107,13 @@ def reset_analysis_state() -> None:
     # Adaptive scaling state
     st.session_state.scale_contexts = {}
     st.session_state.adaptive_scale_toggles = {}
+    
+    # Reset file columns cache (but preserve exclusion keywords for next analysis)
+    st.session_state.uploaded_file_columns = None
+    
+    # Reset excluded metrics tracking
+    st.session_state.excluded_by_keyword = []
+    st.session_state.excluded_by_limit = []
 
 
 def render_sidebar() -> tuple[Optional[str], Optional[Any], bool, bool, bool, bool]:
@@ -138,6 +156,39 @@ def render_sidebar() -> tuple[Optional[str], Optional[Any], bool, bool, bool, bo
             help="Zoom charts to data range when limit values are much larger than data. Limit values will be shown in annotations.",
         )
         st.session_state.use_adaptive_scaling = use_adaptive_scaling
+
+        st.divider()
+
+        # Metric exclusion filter
+        st.subheader("🔍 Exclude Metrics by Keyword")
+        exclusion_input = st.text_input(
+            "Keywords to exclude",
+            value=st.session_state.get("exclusion_keywords_raw", ""),
+            placeholder="e.g., Basis, Credit, Vega",
+            help="Comma-separated keywords. Metrics containing any keyword will be excluded from analysis.",
+            key="exclusion_keywords_input",
+        )
+        st.session_state.exclusion_keywords_raw = exclusion_input
+
+        # Live preview of exclusion count
+        if exclusion_input.strip():
+            keywords, exceeded = parse_exclusion_keywords(exclusion_input, MAX_EXCLUSION_KEYWORDS)
+            
+            if exceeded:
+                st.warning(f"⚠️ Maximum {MAX_EXCLUSION_KEYWORDS} keywords allowed. Extra keywords ignored.")
+            
+            # Preview count if file columns are cached
+            cached_columns = st.session_state.get("uploaded_file_columns")
+            if cached_columns and keywords:
+                _, excluded = filter_metrics_by_keywords(cached_columns, keywords)
+                if len(excluded) == len(cached_columns):
+                    st.error("⚠️ All metrics would be excluded!")
+                elif len(excluded) > 0:
+                    st.caption(f"📊 {len(excluded)} metric(s) will be excluded")
+                else:
+                    st.caption("ℹ️ No metrics match these keywords")
+        else:
+            st.caption("ℹ️ No exclusion filter applied")
 
         st.divider()
 
@@ -239,6 +290,8 @@ def _render_single_export_options(use_llm: bool) -> None:
             st.session_state.portfolio_summary,
             st.session_state.uploaded_file_name,
             use_llm,
+            excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
+            excluded_by_limit=st.session_state.get("excluded_by_limit", []),
         )
         st.download_button(
             label="📄 Download HTML Report",
@@ -255,6 +308,8 @@ def _render_single_export_options(use_llm: bool) -> None:
             st.session_state.portfolio_summary,
             st.session_state.uploaded_file_name,
             use_llm,
+            excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
+            excluded_by_limit=st.session_state.get("excluded_by_limit", []),
         )
         st.download_button(
             label="📦 Download Complete Package (ZIP)",
@@ -304,6 +359,8 @@ def _render_batch_export_options(use_llm: bool) -> None:
                 node_summary,
                 f"{st.session_state.uploaded_file_name} - {selected_node}",
                 use_llm,
+                excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
+                excluded_by_limit=st.session_state.get("excluded_by_limit", []),
             )
             st.download_button(
                 label=f"📄 Download {selected_node} HTML Report",
@@ -321,6 +378,8 @@ def _render_batch_export_options(use_llm: bool) -> None:
             batch_portfolio_summaries,
             st.session_state.uploaded_file_name,
             use_llm,
+            excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
+            excluded_by_limit=st.session_state.get("excluded_by_limit", []),
         )
         st.download_button(
             label="📦 Download All Nodes (ZIP)",
@@ -471,6 +530,9 @@ def handle_analysis(
 
         df[VALUE_DATE_COLUMN] = pd.to_datetime(df[VALUE_DATE_COLUMN])
 
+        # Cache metric columns for live preview in sidebar
+        st.session_state.uploaded_file_columns = get_metric_columns(df)
+
         # Check for node column to determine batch mode
         node_column = detect_node_column(df)
         if node_column:
@@ -544,13 +606,41 @@ def _process_node_analysis(
     initial_metric_count = len(ordered_metrics)
     logger.info("Node %s: Organized %s metric(s)", node_name, initial_metric_count)
 
+    # Track excluded metrics for reporting (accumulate across nodes)
+    keyword_excluded: List[str] = []
+    limit_excluded: List[str] = []
+
+    # Apply keyword exclusion filter
+    keywords, _ = parse_exclusion_keywords(
+        st.session_state.get("exclusion_keywords_raw", ""),
+        MAX_EXCLUSION_KEYWORDS
+    )
+    
+    if keywords:
+        ordered_metrics, excluded_metrics = filter_metrics_by_keywords(ordered_metrics, keywords)
+        if excluded_metrics:
+            keyword_excluded = excluded_metrics
+            st.info(f"🔍 Excluded {len(excluded_metrics)} metric(s) by keyword filter")
+            logger.info("Node %s: Excluded %s metric(s) by keyword filter", node_name, len(excluded_metrics))
+        
+        if not ordered_metrics:
+            st.warning(f"⚠️ All metrics in node {node_name} were excluded by the keyword filter.")
+            logger.warning("Node %s: All metrics excluded by keyword filter", node_name)
+            return [], ""
+
     if filter_metrics_without_limits:
         filtered_metrics = [metric for metric in ordered_metrics if metric_has_meaningful_limits(df, metric)]
-        filtered_out = initial_metric_count - len(filtered_metrics)
-        if filtered_out > 0:
-            st.info(f"Filtered out {filtered_out} metric(s) without limit values.")
-            logger.info("Node %s: Filtered out %s metric(s) without limits", node_name, filtered_out)
+        limit_excluded = [metric for metric in ordered_metrics if metric not in filtered_metrics]
+        if limit_excluded:
+            st.info(f"Filtered out {len(limit_excluded)} metric(s) without limit values.")
+            logger.info("Node %s: Filtered out %s metric(s) without limits", node_name, len(limit_excluded))
         ordered_metrics = filtered_metrics
+
+    # Accumulate excluded metrics in session state (merge with existing)
+    existing_keyword = st.session_state.get("excluded_by_keyword", [])
+    existing_limit = st.session_state.get("excluded_by_limit", [])
+    st.session_state.excluded_by_keyword = list(set(existing_keyword + keyword_excluded))
+    st.session_state.excluded_by_limit = list(set(existing_limit + limit_excluded))
 
     if not ordered_metrics:
         st.warning("No risk metrics available after applying the limit filter.")
@@ -742,13 +832,41 @@ def _handle_single_analysis(
     initial_metric_count = len(ordered_metrics)
     logger.info("Organized %s metric(s)", initial_metric_count)
 
+    # Track excluded metrics for reporting
+    keyword_excluded: List[str] = []
+    limit_excluded: List[str] = []
+
+    # Apply keyword exclusion filter
+    keywords, _ = parse_exclusion_keywords(
+        st.session_state.get("exclusion_keywords_raw", ""),
+        MAX_EXCLUSION_KEYWORDS
+    )
+    
+    if keywords:
+        ordered_metrics, excluded_metrics = filter_metrics_by_keywords(ordered_metrics, keywords)
+        if excluded_metrics:
+            keyword_excluded = excluded_metrics
+            excluded_preview = ', '.join(excluded_metrics[:5])
+            more_text = '...' if len(excluded_metrics) > 5 else ''
+            st.info(f"🔍 Excluded {len(excluded_metrics)} metric(s) by keyword filter: {excluded_preview}{more_text}")
+            logger.info("Excluded %s metric(s) by keyword filter", len(excluded_metrics))
+        
+        if not ordered_metrics:
+            st.error("⚠️ All metrics were excluded by the keyword filter. Please adjust your filter settings.")
+            logger.warning("All metrics excluded by keyword filter")
+            return
+
     if filter_metrics_without_limits:
         filtered_metrics = [metric for metric in ordered_metrics if metric_has_meaningful_limits(df, metric)]
-        filtered_out = initial_metric_count - len(filtered_metrics)
-        if filtered_out > 0:
-            st.info(f"Filtered out {filtered_out} metric(s) without limit values.")
-            logger.info("Filtered out %s metric(s) without limits", filtered_out)
+        limit_excluded = [metric for metric in ordered_metrics if metric not in filtered_metrics]
+        if limit_excluded:
+            st.info(f"Filtered out {len(limit_excluded)} metric(s) without limit values.")
+            logger.info("Filtered out %s metric(s) without limits", len(limit_excluded))
         ordered_metrics = filtered_metrics
+
+    # Store excluded metrics in session state for report generation
+    st.session_state.excluded_by_keyword = keyword_excluded
+    st.session_state.excluded_by_limit = limit_excluded
 
     if not ordered_metrics:
         st.warning("No risk metrics available after applying the limit filter.")

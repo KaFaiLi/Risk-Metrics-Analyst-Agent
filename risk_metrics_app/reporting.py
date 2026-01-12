@@ -113,8 +113,96 @@ def _sort_metrics_by_priority(metrics_analyses: List[dict]) -> List[dict]:
     return priority_analyses + other_analyses
 
 
+def _build_excluded_metrics_section(
+    excluded_by_keyword: List[str],
+    excluded_by_limit: List[str],
+) -> str:
+    """Build HTML section showing excluded metrics by filter type.
+    
+    Args:
+        excluded_by_keyword: List of metrics excluded by user keyword filter
+        excluded_by_limit: List of metrics excluded by limit filter
+        
+    Returns:
+        HTML string for the excluded metrics section, or empty string if none excluded
+    """
+    if not excluded_by_keyword and not excluded_by_limit:
+        return ""
+    
+    # Sort both lists alphabetically for consistent display
+    keyword_sorted = sorted(excluded_by_keyword, key=str.lower)
+    limit_sorted = sorted(excluded_by_limit, key=str.lower)
+    
+    total_excluded = len(keyword_sorted) + len(limit_sorted)
+    
+    # Build keyword filter section
+    keyword_section = ""
+    if keyword_sorted:
+        keyword_items = ''.join([
+            f'<span class="inline-block px-2 py-1 bg-purple-100 text-purple-700 rounded text-sm font-medium">{metric}</span>'
+            for metric in keyword_sorted
+        ])
+        keyword_section = f'''
+        <div class="mb-6">
+            <div class="flex items-center gap-2 mb-3">
+                <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
+                </svg>
+                <h4 class="text-base font-semibold text-purple-800">Filtered by User Keywords ({len(keyword_sorted)})</h4>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                {keyword_items}
+            </div>
+        </div>
+        '''
+    
+    # Build limit filter section
+    limit_section = ""
+    if limit_sorted:
+        limit_items = ''.join([
+            f'<span class="inline-block px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm font-medium">{metric}</span>'
+            for metric in limit_sorted
+        ])
+        limit_section = f'''
+        <div class="mb-4">
+            <div class="flex items-center gap-2 mb-3">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+                </svg>
+                <h4 class="text-base font-semibold text-gray-700">Filtered by Missing Limits ({len(limit_sorted)})</h4>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                {limit_items}
+            </div>
+        </div>
+        '''
+    
+    return f'''
+    <section class="mt-10 bg-slate-50 border border-slate-200 rounded-2xl p-6">
+        <div class="flex items-center gap-3 mb-5">
+            <div class="p-2 bg-slate-200 rounded-lg">
+                <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                </svg>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-slate-800">Excluded Metrics</h3>
+                <p class="text-sm text-slate-500">{total_excluded} metric(s) were excluded from this analysis</p>
+            </div>
+        </div>
+        {keyword_section}
+        {limit_section}
+    </section>
+    '''
+
+
 def create_html_report(
-    metrics_analyses: List[dict], portfolio_summary: str, file_name: str, use_llm: bool
+    metrics_analyses: List[dict],
+    portfolio_summary: str,
+    file_name: str,
+    use_llm: bool,
+    excluded_by_keyword: Optional[List[str]] = None,
+    excluded_by_limit: Optional[List[str]] = None,
 ) -> str:
     """Create a comprehensive HTML report with modern Tailwind CSS design.
     
@@ -124,7 +212,20 @@ def create_html_report(
     - Responsive layout for all device sizes
     - Priority metrics (VaR, SVaR, STTHH) displayed first, then others sorted by name/maturity
     - Smooth scrolling and interactive UI elements
+    - Excluded metrics section showing filtered metrics
+    
+    Args:
+        metrics_analyses: List of metric analysis dictionaries
+        portfolio_summary: AI-generated portfolio summary
+        file_name: Name of the uploaded file
+        use_llm: Whether AI insights were enabled
+        excluded_by_keyword: List of metrics excluded by user keyword filter
+        excluded_by_limit: List of metrics excluded by limit filter
     """
+    # Default to empty lists if not provided
+    excluded_by_keyword = excluded_by_keyword or []
+    excluded_by_limit = excluded_by_limit or []
+    
     # Sort metrics by priority (VaR, SVaR, STTHH first) then by name and maturity
     metrics_analyses_sorted = _sort_metrics_by_priority(metrics_analyses)
     metric_count = len(metrics_analyses_sorted)
@@ -343,6 +444,9 @@ def create_html_report(
     )
     disclaimer_text = "Generated by AI, use with caution." if use_llm else "Generated automatically, review before use."
 
+    # Build excluded metrics section
+    excluded_section_html = _build_excluded_metrics_section(excluded_by_keyword, excluded_by_limit)
+
     html_content = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -457,6 +561,9 @@ def create_html_report(
         
         <!-- Portfolio Summary -->
         {portfolio_html}
+        
+        <!-- Excluded Metrics Section -->
+        {excluded_section_html}
         
         <!-- Footer -->
         <footer class="mt-12 pt-8 border-t border-gray-200">
@@ -578,10 +685,22 @@ def create_html_report(
 
 
 def create_export_package(
-    metrics_analyses: List[dict], portfolio_summary: str, file_name: str, use_llm: bool
+    metrics_analyses: List[dict],
+    portfolio_summary: str,
+    file_name: str,
+    use_llm: bool,
+    excluded_by_keyword: Optional[List[str]] = None,
+    excluded_by_limit: Optional[List[str]] = None,
 ) -> BytesIO:
     """Create a ZIP archive containing the report, charts, and summary text."""
-    html_content = create_html_report(metrics_analyses, portfolio_summary, file_name, use_llm)
+    html_content = create_html_report(
+        metrics_analyses,
+        portfolio_summary,
+        file_name,
+        use_llm,
+        excluded_by_keyword=excluded_by_keyword,
+        excluded_by_limit=excluded_by_limit,
+    )
 
     zip_buffer = BytesIO()
 
@@ -667,6 +786,8 @@ def create_batch_export_package(
     batch_portfolio_summaries: Dict[str, str],
     file_name: str,
     use_llm: bool,
+    excluded_by_keyword: Optional[List[str]] = None,
+    excluded_by_limit: Optional[List[str]] = None,
 ) -> BytesIO:
     """Create a ZIP archive with node-folder structure for batch mode exports.
     
@@ -680,10 +801,16 @@ def create_batch_export_package(
         batch_portfolio_summaries: Dictionary mapping node names to portfolio summaries.
         file_name: Original source file name.
         use_llm: Whether LLM analysis was enabled.
+        excluded_by_keyword: List of metrics excluded by user keyword filter.
+        excluded_by_limit: List of metrics excluded by limit filter.
         
     Returns:
         BytesIO buffer containing the ZIP archive.
     """
+    # Default to empty lists if not provided
+    excluded_by_keyword = excluded_by_keyword or []
+    excluded_by_limit = excluded_by_limit or []
+    
     zip_buffer = BytesIO()
     
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -696,7 +823,9 @@ def create_batch_export_package(
                 metrics_analyses, 
                 portfolio_summary, 
                 f"{file_name} - {node_name}", 
-                use_llm
+                use_llm,
+                excluded_by_keyword=excluded_by_keyword,
+                excluded_by_limit=excluded_by_limit,
             )
             zip_file.writestr(f"{safe_node_name}/report.html", html_content)
             
