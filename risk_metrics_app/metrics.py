@@ -25,6 +25,89 @@ class InterpolatedSeries:
     original: pd.Series
 
 
+def parse_exclusion_keywords(raw_input: str, max_keywords: int = 50) -> Tuple[List[str], bool]:
+    """Parse comma-separated keywords from user input.
+    
+    Args:
+        raw_input: Raw string from text input field
+        max_keywords: Maximum allowed keywords (default 50)
+        
+    Returns:
+        Tuple of (parsed_keywords, exceeded_limit)
+    """
+    if not raw_input or not raw_input.strip():
+        return [], False
+    
+    # Split by comma, strip whitespace, remove empty entries
+    keywords = [kw.strip() for kw in raw_input.split(',') if kw.strip()]
+    
+    # Deduplicate while preserving order
+    keywords = list(dict.fromkeys(keywords))
+    
+    # Check limit
+    exceeded = len(keywords) > max_keywords
+    if exceeded:
+        keywords = keywords[:max_keywords]
+    
+    return keywords, exceeded
+
+
+def filter_metrics_by_keywords(
+    metrics: List[str],
+    keywords: List[str]
+) -> Tuple[List[str], List[str]]:
+    """Filter out metrics matching any exclusion keyword.
+    
+    Uses case-insensitive substring matching. A metric is excluded if any
+    keyword appears within its name.
+    
+    Args:
+        metrics: List of metric column names
+        keywords: List of exclusion keywords (already parsed)
+        
+    Returns:
+        Tuple of (remaining_metrics, excluded_metrics)
+    """
+    if not keywords:
+        return metrics, []
+    
+    def matches_any_keyword(metric: str) -> bool:
+        metric_lower = metric.lower()
+        return any(kw.lower() in metric_lower for kw in keywords)
+    
+    remaining = []
+    excluded = []
+    
+    for metric in metrics:
+        if matches_any_keyword(metric):
+            excluded.append(metric)
+        else:
+            remaining.append(metric)
+    
+    return remaining, excluded
+
+
+def get_metric_columns(df: pd.DataFrame) -> List[str]:
+    """Extract metric column names from DataFrame.
+    
+    Excludes valuedate, limit columns, and node column.
+    
+    Args:
+        df: DataFrame with lowercase column names
+        
+    Returns:
+        List of metric column names
+    """
+    metric_columns = [
+        col for col in df.columns
+        if col.lower() != VALUE_DATE_COLUMN
+        and not col.lower().endswith(LIMIT_MAX_SUFFIX)
+        and not col.lower().endswith(LIMIT_MIN_SUFFIX)
+        and col.lower() != NODE_COLUMN
+    ]
+    return metric_columns
+
+
 def detect_node_column(df: pd.DataFrame) -> Optional[str]:
     """Detect the stranaNodeName column in a case-insensitive manner.
     

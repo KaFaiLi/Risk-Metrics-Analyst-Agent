@@ -14,6 +14,9 @@ LLM_RETRY_DELAY = 2.0
 NODE_COLUMN = "strananodename"  # Case-insensitive detection target (stored lowercase)
 ADAPTIVE_SCALE_THRESHOLD = 0.10  # Apply adaptive scaling when data occupies <10% of range
 
+# Exclusion filter settings
+MAX_EXCLUSION_KEYWORDS = 50
+
 
 def setup_logging() -> logging.Logger:
     """Configure and return the application logger."""
@@ -41,6 +44,7 @@ __all__ = [
     "LLM_RETRY_DELAY",
     "NODE_COLUMN",
     "ADAPTIVE_SCALE_THRESHOLD",
+    "MAX_EXCLUSION_KEYWORDS",
     "logger",
     "setup_logging",
 ]
