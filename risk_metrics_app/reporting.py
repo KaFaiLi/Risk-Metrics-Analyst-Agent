@@ -1,11 +1,12 @@
 from datetime import datetime
 from io import BytesIO
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import zipfile
 import re
 
 import plotly.io as pio
 
+from .metrics import PRIORITY_METRICS, parse_metric_name, get_maturity_order
 from .visuals import create_limit_annotation_html
 
 
@@ -64,6 +65,54 @@ def sanitize_node_name(node_name: str) -> str:
     return sanitized if sanitized else "unnamed_node"
 
 
+def _sort_metrics_by_priority(metrics_analyses: List[dict]) -> List[dict]:
+    """Sort metrics analyses by priority (VaR, SVaR, STTHH first) then by name and maturity.
+    
+    This ensures the HTML report displays priority risk metrics at the top,
+    followed by other metrics sorted alphabetically with maturity ordering.
+    
+    Args:
+        metrics_analyses: List of metric analysis dictionaries with 'metric' key.
+        
+    Returns:
+        Sorted list of metric analyses.
+    """
+    # Separate priority metrics from others
+    priority_analyses = []
+    other_analyses = []
+    
+    for analysis in metrics_analyses:
+        metric = analysis["metric"]
+        metric_lower = metric.lower()
+        is_priority = any(pm.lower() == metric_lower for pm in PRIORITY_METRICS)
+        if is_priority:
+            priority_analyses.append(analysis)
+        else:
+            other_analyses.append(analysis)
+    
+    # Sort priority metrics in defined order
+    def priority_sort_key(analysis: dict) -> int:
+        metric_lower = analysis["metric"].lower()
+        for idx, pm in enumerate(PRIORITY_METRICS):
+            if pm.lower() == metric_lower:
+                return idx
+        return len(PRIORITY_METRICS)
+    
+    priority_analyses.sort(key=priority_sort_key)
+    
+    # Sort other metrics by base name, then maturity
+    def other_sort_key(analysis: dict) -> Tuple[str, int, int, str]:
+        metric = analysis["metric"]
+        base_name, maturity = parse_metric_name(metric)
+        maturity_order = get_maturity_order(maturity)
+        maturity_flag = 0 if maturity is None else 1
+        return (base_name.lower(), maturity_flag, maturity_order, metric)
+    
+    other_analyses.sort(key=other_sort_key)
+    
+    return priority_analyses + other_analyses
+
+
 def create_html_report(
     metrics_analyses: List[dict], portfolio_summary: str, file_name: str, use_llm: bool
 ) -> str:
@@ -73,14 +122,14 @@ def create_html_report(
     - Light mode design with clean, professional styling
     - Sticky navigation with real-time search filtering
     - Responsive layout for all device sizes
-    - Alphabetically sorted metrics for easy scanning
+    - Priority metrics (VaR, SVaR, STTHH) displayed first, then others sorted by name/maturity
     - Smooth scrolling and interactive UI elements
     """
-    # Sort metrics alphabetically for better navigation
-    metrics_analyses_sorted = sorted(metrics_analyses, key=lambda x: x["metric"].lower())
+    # Sort metrics by priority (VaR, SVaR, STTHH first) then by name and maturity
+    metrics_analyses_sorted = _sort_metrics_by_priority(metrics_analyses)
     metric_count = len(metrics_analyses_sorted)
     
-    # Build navigation items (alphabetically sorted)
+    # Build navigation items (priority sorted: VaR, SVaR, STTHH first)
     toc_items = []
     for analysis in metrics_analyses_sorted:
         metric = analysis["metric"]
@@ -95,7 +144,7 @@ def create_html_report(
             </a>
         ''')
     
-    # Build metric sections (alphabetically sorted)
+    # Build metric sections (priority sorted: VaR, SVaR, STTHH first)
     metric_sections = []
     for analysis in metrics_analyses_sorted:
         metric = analysis["metric"]
