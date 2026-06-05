@@ -1,13 +1,80 @@
 from datetime import datetime
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
+import html
+import os
 import zipfile
 import re
 
 import plotly.io as pio
+from plotly.offline import get_plotlyjs
 
 from .metrics import PRIORITY_METRICS, parse_metric_name, get_maturity_order
 from .visuals import create_limit_annotation_html
+
+
+# Visual metadata for each metric risk status, shared across the overview
+# table, navigation dots, and per-card badges.
+_STATUS_META = {
+    "breach": {
+        "label": "Breach",
+        "dot": "bg-red-500",
+        "badge": "bg-red-100 text-red-700 border border-red-200",
+        "chip": "bg-red-50 text-red-700",
+        "order": 0,
+    },
+    "outlier": {
+        "label": "Outlier",
+        "dot": "bg-amber-500",
+        "badge": "bg-amber-100 text-amber-700 border border-amber-200",
+        "chip": "bg-amber-50 text-amber-700",
+        "order": 1,
+    },
+    "ok": {
+        "label": "OK",
+        "dot": "bg-emerald-500",
+        "badge": "bg-emerald-100 text-emerald-700 border border-emerald-200",
+        "chip": "bg-emerald-50 text-emerald-700",
+        "order": 2,
+    },
+}
+
+
+def _metric_status(analysis: dict) -> str:
+    """Classify a metric as 'breach', 'outlier', or 'ok' for status displays."""
+    if analysis.get("breaches"):
+        return "breach"
+    outliers = analysis.get("outliers")
+    if outliers is not None and len(outliers) > 0:
+        return "outlier"
+    return "ok"
+
+
+def _format_value(value: Optional[float]) -> str:
+    """Format a numeric value for display, falling back to an em dash."""
+    return f"{value:.4f}" if value is not None else "—"
+
+
+def _format_utilization(util: Optional[float]) -> str:
+    """Format a limit-utilization percentage for display."""
+    return f"{util:.0f}%" if util is not None else "—"
+
+
+# Path to the vendored Tailwind Play CDN script, embedded for offline reports.
+_TAILWIND_ASSET_PATH = os.path.join(os.path.dirname(__file__), "assets", "tailwind.play.min.js")
+
+
+def _load_inline_tailwind() -> str:
+    """Return an inline <script> tag with the vendored Tailwind runtime.
+
+    Falls back to the Tailwind CDN reference if the vendored asset is missing,
+    so the report still styles correctly when online.
+    """
+    try:
+        with open(_TAILWIND_ASSET_PATH, "r", encoding="utf-8") as asset:
+            return f"<script>{asset.read()}</script>"
+    except OSError:
+        return '<script src="https://cdn.tailwindcss.com"></script>'
 
 
 def make_anchor_id(metric: str) -> str:
@@ -196,6 +263,109 @@ def _build_excluded_metrics_section(
     '''
 
 
+def _build_overview_section(metrics_analyses_sorted: List[dict]) -> str:
+    """Build the executive summary: KPI strip + severity-sorted status table.
+
+    Args:
+        metrics_analyses_sorted: Priority-sorted list of metric analyses.
+
+    Returns:
+        HTML string for the overview section, or empty string if no metrics.
+    """
+    total = len(metrics_analyses_sorted)
+    if total == 0:
+        return ""
+
+    statuses = [(_metric_status(a), a) for a in metrics_analyses_sorted]
+    breach_count = sum(1 for s, _ in statuses if s == "breach")
+    outlier_count = sum(1 for s, _ in statuses if s == "outlier")
+    ok_count = total - breach_count - outlier_count
+
+    def kpi_card(value: int, label: str, value_class: str, ring: str) -> str:
+        return f'''
+        <div class="bg-white border {ring} rounded-2xl p-5 shadow-sm text-center">
+            <div class="text-3xl font-bold {value_class}">{value}</div>
+            <div class="text-xs font-medium text-gray-500 uppercase tracking-wide mt-1">{label}</div>
+        </div>
+        '''
+
+    kpi_strip = f'''
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {kpi_card(total, "Metrics", "text-gray-900", "border-gray-200")}
+        {kpi_card(breach_count, "Breached", "text-red-600", "border-red-200")}
+        {kpi_card(outlier_count, "With Outliers", "text-amber-600", "border-amber-200")}
+        {kpi_card(ok_count, "Within Limits", "text-emerald-600", "border-emerald-200")}
+    </div>
+    '''
+
+    # Severity-first ordering (breaches, then outliers, then ok); stable within ties.
+    ordered = sorted(statuses, key=lambda sa: _STATUS_META[sa[0]]["order"])
+    rows = []
+    for status, analysis in ordered:
+        meta = _STATUS_META[status]
+        metric_safe = html.escape(analysis["metric"])
+        anchor = make_anchor_id(analysis["metric"])
+        breach_events = sum(b.get("count", 0) for b in analysis.get("breaches", []) or [])
+        outliers = analysis.get("outliers")
+        outlier_n = len(outliers) if outliers is not None else 0
+        stats = analysis.get("stats", {})
+        latest_txt = _format_value(stats.get("latest"))
+        util_txt = _format_utilization(stats.get("utilization"))
+        rows.append(f'''
+                <tr class="border-t border-gray-100 hover:bg-gray-50">
+                    <td class="px-4 py-3">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold {meta['badge']}">
+                            <span class="w-1.5 h-1.5 rounded-full {meta['dot']}"></span>{meta['label']}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <a href="#{anchor}" class="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline">{metric_safe}</a>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-700 text-right font-mono">{breach_events}</td>
+                    <td class="px-4 py-3 text-sm text-gray-700 text-right font-mono">{outlier_n}</td>
+                    <td class="px-4 py-3 text-sm text-gray-700 text-right font-mono">{latest_txt}</td>
+                    <td class="px-4 py-3 text-sm text-gray-700 text-right font-mono">{util_txt}</td>
+                </tr>
+        ''')
+
+    table = f'''
+    <div class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead class="bg-gray-50">
+                    <tr class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        <th class="px-4 py-3">Status</th>
+                        <th class="px-4 py-3">Metric</th>
+                        <th class="px-4 py-3 text-right">Breaches</th>
+                        <th class="px-4 py-3 text-right">Outliers</th>
+                        <th class="px-4 py-3 text-right">Latest</th>
+                        <th class="px-4 py-3 text-right">Limit Used</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(rows)}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    '''
+
+    return f'''
+    <section class="mb-10">
+        <div class="flex items-center gap-3 mb-5">
+            <div class="p-2 bg-blue-100 rounded-lg">
+                <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+            <h2 class="text-xl font-bold text-gray-900">Executive Summary</h2>
+        </div>
+        {kpi_strip}
+        {table}
+    </section>
+    '''
+
+
 def create_html_report(
     metrics_analyses: List[dict],
     portfolio_summary: str,
@@ -203,6 +373,7 @@ def create_html_report(
     use_llm: bool,
     excluded_by_keyword: Optional[List[str]] = None,
     excluded_by_limit: Optional[List[str]] = None,
+    self_contained: bool = False,
 ) -> str:
     """Create a comprehensive HTML report with modern Tailwind CSS design.
     
@@ -221,26 +392,39 @@ def create_html_report(
         use_llm: Whether AI insights were enabled
         excluded_by_keyword: List of metrics excluded by user keyword filter
         excluded_by_limit: List of metrics excluded by limit filter
+        self_contained: When True, embed Plotly and Tailwind inline so the
+            report renders fully offline (no CDN/network dependency).
     """
     # Default to empty lists if not provided
     excluded_by_keyword = excluded_by_keyword or []
     excluded_by_limit = excluded_by_limit or []
-    
+
     # Sort metrics by priority (VaR, SVaR, STTHH first) then by name and maturity
     metrics_analyses_sorted = _sort_metrics_by_priority(metrics_analyses)
     metric_count = len(metrics_analyses_sorted)
-    
+
+    # Status counts for the navigation filter chips
+    status_counts = {"breach": 0, "outlier": 0, "ok": 0}
+    for analysis in metrics_analyses_sorted:
+        status_counts[_metric_status(analysis)] += 1
+
+    # Executive summary (KPI strip + status table)
+    overview_html = _build_overview_section(metrics_analyses_sorted)
+
     # Build navigation items (priority sorted: VaR, SVaR, STTHH first)
     toc_items = []
     for analysis in metrics_analyses_sorted:
         metric = analysis["metric"]
+        metric_safe = html.escape(metric)
         anchor_id = make_anchor_id(metric)
+        status = _metric_status(analysis)
+        dot_class = _STATUS_META[status]["dot"]
         toc_items.append(f'''
-            <a href="#{anchor_id}" 
+            <a href="#{anchor_id}" data-status="{status}"
                class="metric-nav-item group p-3 bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-400 rounded-xl transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                 <div class="flex items-center gap-2">
-                    <div class="w-2 h-2 rounded-full bg-blue-500 group-hover:bg-blue-600 transition-colors flex-shrink-0"></div>
-                    <span class="text-sm font-medium text-gray-700 group-hover:text-blue-600 truncate transition-colors">{metric}</span>
+                    <div class="w-2 h-2 rounded-full {dot_class} flex-shrink-0"></div>
+                    <span class="text-sm font-medium text-gray-700 group-hover:text-blue-600 truncate transition-colors">{metric_safe}</span>
                 </div>
             </a>
         ''')
@@ -249,6 +433,7 @@ def create_html_report(
     metric_sections = []
     for analysis in metrics_analyses_sorted:
         metric = analysis["metric"]
+        metric_safe = html.escape(metric)
         anchor_id = make_anchor_id(metric)
         stats = analysis["stats"]
         outliers = analysis["outliers"]
@@ -257,8 +442,13 @@ def create_html_report(
         insights = analysis["insights"]
         fig = analysis["fig"]
         scale_context = analysis.get("scale_context")
+        status = _metric_status(analysis)
+        status_meta = _STATUS_META[status]
 
-        fig_html = fig.to_html(include_plotlyjs="cdn", div_id=f"plot-{metric.replace('/', '_')}")
+        # In self-contained mode Plotly.js is embedded once in <head>, so each
+        # figure omits the library; otherwise each figure references the CDN.
+        plotlyjs_mode = False if self_contained else "cdn"
+        fig_html = fig.to_html(include_plotlyjs=plotlyjs_mode, full_html=False, div_id=f"plot-{metric.replace('/', '_')}")
 
         # Generate limit annotation HTML if adaptive scaling was applied
         limit_annotation_html = ""
@@ -347,6 +537,19 @@ def create_html_report(
             </div>
             '''
 
+        # Latest value and limit-utilization cards (utilization is colour-coded)
+        latest_txt = _format_value(stats.get("latest"))
+        util_value = stats.get("utilization")
+        util_txt = _format_utilization(util_value)
+        if util_value is None:
+            util_bg = "bg-slate-700"
+        elif util_value >= 100:
+            util_bg = "bg-red-600"
+        elif util_value >= 70:
+            util_bg = "bg-amber-500"
+        else:
+            util_bg = "bg-emerald-600"
+
         metric_section = f'''
         <article id="{anchor_id}" class="mb-10 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden scroll-mt-32">
             <!-- Metric Header -->
@@ -358,7 +561,10 @@ def create_html_report(
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
                             </svg>
                         </div>
-                        <h2 class="text-2xl sm:text-3xl font-bold text-gray-900">{metric}</h2>
+                        <h2 class="text-2xl sm:text-3xl font-bold text-gray-900">{metric_safe}</h2>
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold {status_meta['badge']}">
+                            <span class="w-1.5 h-1.5 rounded-full {status_meta['dot']}"></span>{status_meta['label']}
+                        </span>
                     </div>
                     <a href="#top" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg text-gray-600 hover:text-gray-800 transition-all text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -372,7 +578,15 @@ def create_html_report(
             <!-- Metric Content -->
             <div class="p-6 sm:p-8">
                 <!-- Stats Grid -->
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-slate-700 rounded-xl p-4 text-white shadow-md">
+                        <div class="text-xs font-medium text-slate-300 uppercase tracking-wide mb-1">Latest</div>
+                        <div class="text-xl sm:text-2xl font-bold font-mono">{latest_txt}</div>
+                    </div>
+                    <div class="{util_bg} rounded-xl p-4 text-white shadow-md">
+                        <div class="text-xs font-medium text-white/70 uppercase tracking-wide mb-1">Limit Used</div>
+                        <div class="text-xl sm:text-2xl font-bold font-mono">{util_txt}</div>
+                    </div>
                     <div class="bg-slate-700 rounded-xl p-4 text-white shadow-md">
                         <div class="text-xs font-medium text-slate-300 uppercase tracking-wide mb-1">Mean</div>
                         <div class="text-xl sm:text-2xl font-bold font-mono">{stats['mean']:.4f}</div>
@@ -389,7 +603,7 @@ def create_html_report(
                         <div class="text-xs font-medium text-slate-300 uppercase tracking-wide mb-1">Min</div>
                         <div class="text-xl sm:text-2xl font-bold font-mono">{stats['min']:.4f}</div>
                     </div>
-                    <div class="bg-slate-700 rounded-xl p-4 text-white shadow-md col-span-2 sm:col-span-1">
+                    <div class="bg-slate-700 rounded-xl p-4 text-white shadow-md">
                         <div class="text-xs font-medium text-slate-300 uppercase tracking-wide mb-1">Max</div>
                         <div class="text-xl sm:text-2xl font-bold font-mono">{stats['max']:.4f}</div>
                     </div>
@@ -447,13 +661,31 @@ def create_html_report(
     # Build excluded metrics section
     excluded_section_html = _build_excluded_metrics_section(excluded_by_keyword, excluded_by_limit)
 
+    # Escape the user-supplied file name before embedding it in the document.
+    file_name_safe = html.escape(file_name)
+
+    # Resolve front-end assets. In self-contained mode Tailwind, Plotly and
+    # fonts are embedded so the report renders with no network access.
+    if self_contained:
+        tailwind_tag = _load_inline_tailwind()
+        plotly_head_tag = f"<script>{get_plotlyjs()}</script>"
+        fonts_tags = ""  # rely on the system-ui fallback in the stylesheet
+    else:
+        tailwind_tag = '<script src="https://cdn.tailwindcss.com"></script>'
+        plotly_head_tag = ""
+        fonts_tags = (
+            '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+            '    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+            '    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">'
+        )
+
     html_content = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Risk Metrics Analysis Report - {file_name}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Risk Metrics Analysis Report - {file_name_safe}</title>
+    {tailwind_tag}
     <script>
         tailwind.config = {{
             theme: {{
@@ -466,9 +698,8 @@ def create_html_report(
             }}
         }}
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    {plotly_head_tag}
+    {fonts_tags}
     <style>
         html {{ scroll-behavior: smooth; }}
         body {{ font-family: 'Inter', system-ui, sans-serif; }}
@@ -496,7 +727,7 @@ def create_html_report(
                     <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                     </svg>
-                    {file_name}
+                    {file_name_safe}
                 </span>
                 <span class="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-full text-sm font-medium text-blue-700">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -507,7 +738,10 @@ def create_html_report(
                 {ai_status_badge}
             </div>
         </header>
-        
+
+        <!-- Executive Summary -->
+        {overview_html}
+
         <!-- Sticky Navigation -->
         <nav id="stickyNav" class="sticky top-2 z-40 mb-10 bg-white/95 backdrop-blur-md border border-gray-200 rounded-2xl shadow-xl no-print">
             <div class="p-4 sm:p-5">
@@ -535,7 +769,15 @@ def create_html_report(
                         <span class="text-sm font-medium hidden sm:inline">Browse</span>
                     </button>
                 </div>
-                
+
+                <!-- Status Filter Chips -->
+                <div id="statusFilters" class="flex flex-wrap items-center gap-2 mt-3">
+                    <button type="button" data-filter="all" class="status-chip px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 transition-all focus:outline-none">All ({metric_count})</button>
+                    <button type="button" data-filter="breach" class="status-chip px-3 py-1.5 rounded-full text-xs font-semibold {_STATUS_META['breach']['chip']} transition-all focus:outline-none">Breaches ({status_counts['breach']})</button>
+                    <button type="button" data-filter="outlier" class="status-chip px-3 py-1.5 rounded-full text-xs font-semibold {_STATUS_META['outlier']['chip']} transition-all focus:outline-none">Outliers ({status_counts['outlier']})</button>
+                    <button type="button" data-filter="ok" class="status-chip px-3 py-1.5 rounded-full text-xs font-semibold {_STATUS_META['ok']['chip']} transition-all focus:outline-none">Within limits ({status_counts['ok']})</button>
+                </div>
+
                 <!-- Navigation Grid (collapsible) -->
                 <div id="navContainer" class="hidden mt-4 max-h-64 overflow-y-auto">
                     <div id="navGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 pr-2">
@@ -594,14 +836,31 @@ def create_html_report(
             const navGrid = document.getElementById('navGrid');
             const navContainer = document.getElementById('navContainer');
             const totalMetrics = {metric_count};
-            
+
+            // Status filter chips
+            const statusChips = document.querySelectorAll('.status-chip');
+            let activeStatusFilter = 'all';
+
+            function applyChipStyles() {{
+                statusChips.forEach(chip => {{
+                    if (chip.dataset.filter === activeStatusFilter) {{
+                        chip.classList.add('ring-2', 'ring-blue-400', 'ring-offset-1');
+                    }} else {{
+                        chip.classList.remove('ring-2', 'ring-blue-400', 'ring-offset-1');
+                    }}
+                }});
+            }}
+
             function updateVisibility(searchTerm) {{
                 let count = 0;
                 searchTerm = searchTerm.toLowerCase().trim();
-                
+
                 metricItems.forEach(item => {{
                     const text = item.textContent.toLowerCase();
-                    if (!searchTerm || text.includes(searchTerm)) {{
+                    const status = item.dataset.status || 'ok';
+                    const matchesSearch = !searchTerm || text.includes(searchTerm);
+                    const matchesStatus = activeStatusFilter === 'all' || status === activeStatusFilter;
+                    if (matchesSearch && matchesStatus) {{
                         item.classList.remove('hidden');
                         count++;
                     }} else {{
@@ -653,7 +912,20 @@ def create_html_report(
                     toggleIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>';
                 }}
             }});
-            
+
+            // Status filter chips: expand the panel and filter by status
+            statusChips.forEach(chip => {{
+                chip.addEventListener('click', () => {{
+                    activeStatusFilter = chip.dataset.filter;
+                    applyChipStyles();
+                    navExpanded = true;
+                    navContainer.classList.remove('hidden');
+                    toggleIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>';
+                    updateVisibility(searchInput.value);
+                }});
+            }});
+            applyChipStyles();
+
             // Smooth scrolling for anchor links
             document.querySelectorAll('a[href^="#"]').forEach(anchor => {{
                 anchor.addEventListener('click', function(e) {{
@@ -691,8 +963,13 @@ def create_export_package(
     use_llm: bool,
     excluded_by_keyword: Optional[List[str]] = None,
     excluded_by_limit: Optional[List[str]] = None,
+    self_contained: bool = True,
 ) -> BytesIO:
-    """Create a ZIP archive containing the report, charts, and summary text."""
+    """Create a ZIP archive containing the report, charts, and summary text.
+
+    The bundled HTML report defaults to self-contained so the archive can be
+    opened offline.
+    """
     html_content = create_html_report(
         metrics_analyses,
         portfolio_summary,
@@ -700,6 +977,7 @@ def create_export_package(
         use_llm,
         excluded_by_keyword=excluded_by_keyword,
         excluded_by_limit=excluded_by_limit,
+        self_contained=self_contained,
     )
 
     zip_buffer = BytesIO()
@@ -788,6 +1066,7 @@ def create_batch_export_package(
     use_llm: bool,
     excluded_by_keyword: Optional[List[str]] = None,
     excluded_by_limit: Optional[List[str]] = None,
+    self_contained: bool = True,
 ) -> BytesIO:
     """Create a ZIP archive with node-folder structure for batch mode exports.
     
@@ -820,12 +1099,13 @@ def create_batch_export_package(
             
             # Generate HTML report for this node
             html_content = create_html_report(
-                metrics_analyses, 
-                portfolio_summary, 
-                f"{file_name} - {node_name}", 
+                metrics_analyses,
+                portfolio_summary,
+                f"{file_name} - {node_name}",
                 use_llm,
                 excluded_by_keyword=excluded_by_keyword,
                 excluded_by_limit=excluded_by_limit,
+                self_contained=self_contained,
             )
             zip_file.writestr(f"{safe_node_name}/report.html", html_content)
             

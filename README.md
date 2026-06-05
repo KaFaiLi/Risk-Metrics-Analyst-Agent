@@ -37,9 +37,16 @@ An intelligent Streamlit application for analyzing financial risk metrics with A
 - Batch export with node-folder structure
 
 ### 📄 Export Options
-- **HTML Report**: Single-file interactive report with embedded charts and AI commentary
+- **HTML Report**: Single-file interactive report with an executive summary (KPI strip + status table), status-aware navigation, embedded charts, and AI commentary
+- **Self-contained mode**: Optionally embed Plotly and styling so the report renders fully offline (no CDN/network dependency). ZIP packages are self-contained by default; the single-file HTML download offers a checkbox.
 - **ZIP Package**: Complete export with HTML report, PNG chart images, and text summary
 - Excluded metrics section in reports showing filter reasons (user keywords vs. missing limits)
+
+### 🧭 Report Navigation & Status
+- Executive summary at the top: counts of breached / outlier / within-limit metrics plus a severity-sorted table with latest value and limit utilization
+- Navigation dots and per-metric badges colour-coded by status (breach / outlier / OK)
+- Filter the metric navigation by status, in addition to free-text search
+- Per-metric stat cards include the latest value and colour-coded limit utilization (%)
 
 ## Project Structure
 
@@ -53,6 +60,7 @@ Risk-Metrics-Analyst-Agent/
 ├── Output/                     # Generated reports and charts
 └── risk_metrics_app/
     ├── __init__.py
+    ├── assets/                 # Vendored front-end assets (Tailwind runtime for offline reports)
     ├── app.py                  # Streamlit UI and workflow
     ├── config.py               # Configuration and constants
     ├── extraction.py           # Mock API data extraction
