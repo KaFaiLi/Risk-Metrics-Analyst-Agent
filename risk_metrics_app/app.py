@@ -13,6 +13,7 @@ from .metrics import (
     VALUE_DATE_COLUMN,
     calculate_statistics,
     check_limit_breaches,
+    compute_risk_indicators,
     detect_node_column,
     filter_metrics_by_keywords,
     get_metric_columns,
@@ -282,6 +283,12 @@ def render_export_options() -> None:
 
 def _render_single_export_options(use_llm: bool) -> None:
     """Render export options for single-mode analysis."""
+    self_contained = st.checkbox(
+        "Self-contained HTML (works offline, larger file)",
+        value=False,
+        key="single_self_contained",
+        help="Embed charts and styling so the report opens without internet access.",
+    )
     col1, col2 = st.columns(2)
 
     with col1:
@@ -292,6 +299,7 @@ def _render_single_export_options(use_llm: bool) -> None:
             use_llm,
             excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
             excluded_by_limit=st.session_state.get("excluded_by_limit", []),
+            self_contained=self_contained,
         )
         st.download_button(
             label="📄 Download HTML Report",
@@ -338,7 +346,14 @@ def _render_batch_export_options(use_llm: bool) -> None:
     batch_portfolio_summaries = st.session_state.get("batch_portfolio_summaries", {})
     
     st.markdown("**Batch Mode Export**: Downloads will be organized by node in separate folders.")
-    
+
+    self_contained = st.checkbox(
+        "Self-contained HTML (works offline, larger file)",
+        value=False,
+        key="batch_self_contained",
+        help="Embed charts and styling so reports open without internet access.",
+    )
+
     col1, col2 = st.columns(2)
     
     with col1:
@@ -361,6 +376,7 @@ def _render_batch_export_options(use_llm: bool) -> None:
                 use_llm,
                 excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
                 excluded_by_limit=st.session_state.get("excluded_by_limit", []),
+                self_contained=self_contained,
             )
             st.download_button(
                 label=f"📄 Download {selected_node} HTML Report",
@@ -669,6 +685,7 @@ def _process_node_analysis(
 
         metric_series = df[metric]
         stats, outliers = calculate_statistics(metric_series)
+        stats.update(compute_risk_indicators(metric_series, max_limit, min_limit))
         breaches = check_limit_breaches(df, metric, max_limit, min_limit)
 
         # Calculate scale context for adaptive scaling
@@ -895,6 +912,7 @@ def _handle_single_analysis(
 
         metric_series = df[metric]
         stats, outliers = calculate_statistics(metric_series)
+        stats.update(compute_risk_indicators(metric_series, max_limit, min_limit))
         breaches = check_limit_breaches(df, metric, max_limit, min_limit)
 
         # Calculate scale context for adaptive scaling

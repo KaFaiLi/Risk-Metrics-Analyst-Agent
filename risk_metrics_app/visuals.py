@@ -318,7 +318,15 @@ def create_plotly_chart(
         hovermode="x unified",
         template="plotly_white",
         height=500,
-        showlegend=False,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.25,
+            xanchor="center",
+            x=0.5,
+        ),
+        margin=dict(b=90),
     )
 
     return fig

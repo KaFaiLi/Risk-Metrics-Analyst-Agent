@@ -308,6 +308,57 @@ def check_limit_breaches(
     return breaches
 
 
+def compute_risk_indicators(
+    metric_series: pd.Series,
+    max_limit=None,
+    min_limit=None,
+) -> dict:
+    """Compute the latest observed value and limit utilization for a metric.
+
+    The latest value is the most recent non-NaN observation. Limit utilization
+    expresses the latest value as a percentage of the nearest binding limit
+    (whichever side the value is consuming the most of). It is ``None`` when no
+    limit is available or the relevant limit is zero.
+
+    Args:
+        metric_series: The metric data series (chronologically ordered).
+        max_limit: Optional series of maximum limit values (forward-filled).
+        min_limit: Optional series of minimum limit values (forward-filled).
+
+    Returns:
+        Dict with keys ``latest``, ``utilization`` (percent or None),
+        ``latest_max_limit`` and ``latest_min_limit``.
+    """
+    clean = metric_series.dropna()
+    latest = float(clean.iloc[-1]) if not clean.empty else None
+
+    def _last_value(series) -> Optional[float]:
+        if series is None:
+            return None
+        s = series.dropna()
+        return float(s.iloc[-1]) if not s.empty else None
+
+    latest_max_limit = _last_value(max_limit)
+    latest_min_limit = _last_value(min_limit)
+
+    utilization: Optional[float] = None
+    if latest is not None:
+        ratios = []
+        if latest_max_limit not in (None, 0):
+            ratios.append(latest / latest_max_limit)
+        if latest_min_limit not in (None, 0):
+            ratios.append(latest / latest_min_limit)
+        if ratios:
+            utilization = max(ratios) * 100.0
+
+    return {
+        "latest": latest,
+        "utilization": utilization,
+        "latest_max_limit": latest_max_limit,
+        "latest_min_limit": latest_min_limit,
+    }
+
+
 __all__ = [
     "PRIORITY_METRICS",
     "LIMIT_MAX_SUFFIX",
@@ -316,6 +367,7 @@ __all__ = [
     "InterpolatedSeries",
     "calculate_statistics",
     "check_limit_breaches",
+    "compute_risk_indicators",
     "detect_node_column",
     "get_maturity_order",
     "interpolate_for_display",
