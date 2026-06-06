@@ -700,9 +700,13 @@ def _process_node_analysis(
         logger.warning("Node %s: No metrics available after applying limit filter", node_name)
         return [], ""
 
-    # Stash wide DataFrame and finalized ordered_metrics for Power BI dataset export
+    # Stash wide DataFrame and finalized ordered_metrics for Power BI dataset export.
+    # Union-merge metrics across nodes (preserving priority order) so a metric present
+    # only in an earlier node is not dropped when a later node has a different set.
     st.session_state.dataset_node_frames[node_name] = df
-    st.session_state.dataset_ordered_metrics = ordered_metrics
+    st.session_state.dataset_ordered_metrics = list(
+        dict.fromkeys(st.session_state.dataset_ordered_metrics + ordered_metrics)
+    )
 
     st.success(f"✅ Loaded {len(df)} rows with {len(ordered_metrics)} risk metrics")
 
