@@ -14,3 +14,8 @@ langchain
 # - langchain-google-genai
 # If installation fails, try the correct package name for your environment.
 langchain-google-genai
+# HumanMessage is imported from langchain_core.messages (langchain 1.x); pin it explicitly
+langchain-core
+
+# Testing
+pytest>=8.0

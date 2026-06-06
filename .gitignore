@@ -122,4 +122,7 @@ Desktop.ini
 .AppleDouble
 .LSOverride
 
+# Brainstorm visual-companion mockups (Output/ already covers powerbi_dataset.csv)
+.superpowers/
+
 # End of file

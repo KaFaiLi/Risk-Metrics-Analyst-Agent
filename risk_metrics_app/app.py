@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
-from .config import logger, MAX_EXCLUSION_KEYWORDS
+from .config import logger, MAX_EXCLUSION_KEYWORDS, OUTPUT_DIR
 from .llm import LLMRequest, get_portfolio_summary, process_llm_requests, run_async_task
 from .metrics import (
     LIMIT_MAX_SUFFIX,
@@ -23,6 +23,7 @@ from .metrics import (
 )
 from .prompts import create_llm_prompt
 from .reporting import create_batch_export_package, create_export_package, create_html_report, sanitize_node_name
+from .dataset import build_long_dataset, write_long_dataset_csv
 from .visuals import (
     calculate_scale_context,
     create_limit_annotation_html,
@@ -72,6 +73,10 @@ def initialize_session_state() -> None:
     st.session_state.setdefault("excluded_by_keyword", [])  # List[str] - metrics excluded by keyword filter
     st.session_state.setdefault("excluded_by_limit", [])  # List[str] - metrics excluded by limit filter
 
+    # Power BI long-format dataset state
+    st.session_state.setdefault("dataset_node_frames", {})  # Dict[str, pd.DataFrame] - node -> wide df
+    st.session_state.setdefault("dataset_ordered_metrics", [])  # List[str] - canonical ordered metrics
+
 
 def metric_has_meaningful_limits(df: pd.DataFrame, metric: str) -> bool:
     """Return True if at least one limit column contains non-zero, non-null values."""
@@ -114,6 +119,10 @@ def reset_analysis_state() -> None:
     # Reset excluded metrics tracking
     st.session_state.excluded_by_keyword = []
     st.session_state.excluded_by_limit = []
+
+    # Reset Power BI dataset state
+    st.session_state.dataset_node_frames = {}
+    st.session_state.dataset_ordered_metrics = []
 
 
 def render_sidebar() -> tuple[Optional[str], Optional[Any], bool, bool, bool, bool]:
@@ -282,6 +291,16 @@ def render_export_options() -> None:
 
 def _render_single_export_options(use_llm: bool) -> None:
     """Render export options for single-mode analysis."""
+    # Build Power BI dataset once for reuse in ZIP and download button
+    node_frames = st.session_state.get("dataset_node_frames", {})
+    ordered_metrics = st.session_state.get("dataset_ordered_metrics", [])
+    long_dataset_csv: Optional[str] = None
+    if node_frames and ordered_metrics:
+        long_df = build_long_dataset(node_frames, ordered_metrics)
+        long_dataset_csv = long_df.to_csv(index=False, date_format="%Y-%m-%d")
+        dataset_path = os.path.join(OUTPUT_DIR, "powerbi_dataset.csv")
+        write_long_dataset_csv(long_df, dataset_path)
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -310,6 +329,7 @@ def _render_single_export_options(use_llm: bool) -> None:
             use_llm,
             excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
             excluded_by_limit=st.session_state.get("excluded_by_limit", []),
+            long_dataset_csv=long_dataset_csv,
         )
         st.download_button(
             label="📦 Download Complete Package (ZIP)",
@@ -320,11 +340,22 @@ def _render_single_export_options(use_llm: bool) -> None:
             key="download_zip",
         )
 
+    if long_dataset_csv:
+        csv_bytes = long_dataset_csv.encode("utf-8")
+        st.download_button(
+            label="⬇️ Download Power BI dataset (CSV)",
+            data=csv_bytes,
+            file_name="powerbi_dataset.csv",
+            mime="text/csv",
+            key="download_powerbi_dataset",
+        )
+
     st.info(
         """
     **Export Options:**
     - **HTML Report**: Single file with interactive charts and (when enabled) AI commentary
     - **Complete Package**: ZIP file containing HTML report, chart images (PNG), and text summary
+    - **Power BI dataset**: Long-format CSV for direct import into Power BI
 
     💡 **Tip**: Your results are saved in this session. You can download multiple times or start a new analysis using the button in the sidebar.
     """,
@@ -336,11 +367,21 @@ def _render_batch_export_options(use_llm: bool) -> None:
     """Render export options for batch-mode analysis with node-folder structure."""
     batch_results = st.session_state.get("batch_results", {})
     batch_portfolio_summaries = st.session_state.get("batch_portfolio_summaries", {})
-    
+
+    # Build Power BI dataset once for reuse in ZIP and download button
+    node_frames = st.session_state.get("dataset_node_frames", {})
+    ordered_metrics = st.session_state.get("dataset_ordered_metrics", [])
+    long_dataset_csv: Optional[str] = None
+    if node_frames and ordered_metrics:
+        long_df = build_long_dataset(node_frames, ordered_metrics)
+        long_dataset_csv = long_df.to_csv(index=False, date_format="%Y-%m-%d")
+        dataset_path = os.path.join(OUTPUT_DIR, "powerbi_dataset.csv")
+        write_long_dataset_csv(long_df, dataset_path)
+
     st.markdown("**Batch Mode Export**: Downloads will be organized by node in separate folders.")
-    
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         # Individual node export selector
         node_names = list(batch_results.keys())
@@ -349,11 +390,11 @@ def _render_batch_export_options(use_llm: bool) -> None:
             options=node_names,
             key="export_node_selector",
         )
-        
+
         if selected_node:
             node_analyses = batch_results.get(selected_node, [])
             node_summary = batch_portfolio_summaries.get(selected_node, "")
-            
+
             html_report = create_html_report(
                 node_analyses,
                 node_summary,
@@ -380,6 +421,7 @@ def _render_batch_export_options(use_llm: bool) -> None:
             use_llm,
             excluded_by_keyword=st.session_state.get("excluded_by_keyword", []),
             excluded_by_limit=st.session_state.get("excluded_by_limit", []),
+            long_dataset_csv=long_dataset_csv,
         )
         st.download_button(
             label="📦 Download All Nodes (ZIP)",
@@ -390,6 +432,16 @@ def _render_batch_export_options(use_llm: bool) -> None:
             key="download_batch_zip",
         )
 
+    if long_dataset_csv:
+        csv_bytes = long_dataset_csv.encode("utf-8")
+        st.download_button(
+            label="⬇️ Download Power BI dataset (CSV)",
+            data=csv_bytes,
+            file_name="powerbi_dataset.csv",
+            mime="text/csv",
+            key="download_powerbi_dataset",
+        )
+
     st.info(
         """
     **Batch Export Options:**
@@ -397,6 +449,7 @@ def _render_batch_export_options(use_llm: bool) -> None:
     - **All Nodes ZIP**: Download all nodes in a ZIP with folder structure:
       - `NodeA/report.html`, `NodeA/charts/`, `NodeA/summary.txt`
       - `NodeB/report.html`, `NodeB/charts/`, `NodeB/summary.txt`
+    - **Power BI dataset**: Long-format CSV covering all nodes for direct import into Power BI
 
     💡 **Tip**: Each node folder contains complete analysis with charts and (when enabled) AI commentary.
     """,
@@ -647,6 +700,14 @@ def _process_node_analysis(
         logger.warning("Node %s: No metrics available after applying limit filter", node_name)
         return [], ""
 
+    # Stash wide DataFrame and finalized ordered_metrics for Power BI dataset export.
+    # Union-merge metrics across nodes (preserving priority order) so a metric present
+    # only in an earlier node is not dropped when a later node has a different set.
+    st.session_state.dataset_node_frames[node_name] = df
+    st.session_state.dataset_ordered_metrics = list(
+        dict.fromkeys(st.session_state.dataset_ordered_metrics + ordered_metrics)
+    )
+
     st.success(f"✅ Loaded {len(df)} rows with {len(ordered_metrics)} risk metrics")
 
     metrics_analyses: List[dict] = []
@@ -872,6 +933,10 @@ def _handle_single_analysis(
         st.warning("No risk metrics available after applying the limit filter.")
         logger.warning("No metrics available after applying limit filter")
         return
+
+    # Stash wide DataFrame and finalized ordered_metrics for Power BI dataset export
+    st.session_state.dataset_node_frames["__single__"] = df
+    st.session_state.dataset_ordered_metrics = ordered_metrics
 
     st.success(f"✅ Loaded {len(df)} rows with {len(ordered_metrics)} risk metrics")
 
