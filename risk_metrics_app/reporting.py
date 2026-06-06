@@ -598,7 +598,7 @@ def create_html_report(
                 <!-- Search and Controls -->
                 <div class="flex items-center gap-3 flex-wrap">
                     <div class="flex gap-2" id="statusChips">
-                        <button data-status="all" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white">All</button>
+                        <button data-status="all" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-100 text-blue-700 ring-2 ring-offset-1 ring-blue-400">All</button>
                         <button data-status="breach" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-red-100 text-red-700">Breaches</button>
                         <button data-status="outlier" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-700">Outliers</button>
                         <button data-status="ok" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-100 text-emerald-700">OK</button>
