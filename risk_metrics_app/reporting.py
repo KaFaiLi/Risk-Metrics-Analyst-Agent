@@ -10,6 +10,26 @@ from .metrics import PRIORITY_METRICS, parse_metric_name, get_maturity_order
 from .visuals import create_limit_annotation_html
 
 
+def metric_status(analysis: dict) -> str:
+    """Return 'breach', 'outlier', or 'ok' for a metric analysis.
+
+    Precedence: a breaching metric is 'breach' even if it also has outliers.
+    """
+    if analysis.get("breaches"):
+        return "breach"
+    if len(analysis.get("outliers", [])) > 0:
+        return "outlier"
+    return "ok"
+
+
+def kpi_counts(metrics_analyses: List[dict]) -> dict:
+    """Aggregate status counts for the KPI summary strip."""
+    counts = {"total": len(metrics_analyses), "breach": 0, "outlier": 0, "ok": 0}
+    for analysis in metrics_analyses:
+        counts[metric_status(analysis)] += 1
+    return counts
+
+
 def make_anchor_id(metric: str) -> str:
     """
     Generate a safe HTML anchor ID from a metric name.
@@ -935,6 +955,8 @@ __all__ = [
     "create_batch_export_package",
     "create_export_package",
     "create_html_report",
+    "kpi_counts",
     "make_anchor_id",
+    "metric_status",
     "sanitize_node_name",
 ]
