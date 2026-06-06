@@ -249,7 +249,33 @@ def create_html_report(
     # Sort metrics by priority (VaR, SVaR, STTHH first) then by name and maturity
     metrics_analyses_sorted = _sort_metrics_by_priority(metrics_analyses)
     metric_count = len(metrics_analyses_sorted)
-    
+
+    counts = kpi_counts(metrics_analyses_sorted)
+    attention = [a for a in metrics_analyses_sorted if metric_status(a) != "ok"]
+    attention_rows = []
+    for a in attention:
+        st_ = metric_status(a)
+        icon = "⛔" if st_ == "breach" else "⚠️"
+        n_breach = sum(b["count"] for b in a.get("breaches", []))
+        detail = f"{n_breach} breaches" if st_ == "breach" else f"{len(a.get('outliers', []))} outliers"
+        anchor = make_anchor_id(a["metric"])
+        attention_rows.append(
+            f'<tr class="border-b border-gray-100 hover:bg-gray-50">'
+            f'<td class="py-2 px-3">{icon}</td>'
+            f'<td class="py-2 px-3 font-medium">{a["metric"]}</td>'
+            f'<td class="py-2 px-3 text-gray-600">{detail}</td>'
+            f'<td class="py-2 px-3"><a href="#{anchor}" class="text-blue-600 hover:underline">jump →</a></td>'
+            f'</tr>'
+        )
+    attention_table = (
+        f'<div class="overflow-x-auto"><table class="w-full text-sm">'
+        f'<thead><tr class="text-left text-gray-500"><th class="py-2 px-3"></th>'
+        f'<th class="py-2 px-3">Metric</th><th class="py-2 px-3">Issue</th>'
+        f'<th class="py-2 px-3"></th></tr></thead><tbody>{"".join(attention_rows)}</tbody></table></div>'
+        if attention_rows else
+        '<p class="text-emerald-600 font-medium">No breaches or outliers detected.</p>'
+    )
+
     # Build navigation items (priority sorted: VaR, SVaR, STTHH first)
     toc_items = []
     for analysis in metrics_analyses_sorted:
@@ -268,6 +294,10 @@ def create_html_report(
     # Build metric sections (priority sorted: VaR, SVaR, STTHH first)
     metric_sections = []
     for analysis in metrics_analyses_sorted:
+        status = metric_status(analysis)
+        border = {"breach": "border-l-4 border-l-red-500",
+                  "outlier": "border-l-4 border-l-amber-400",
+                  "ok": "border-l-4 border-l-emerald-400"}[status]
         metric = analysis["metric"]
         anchor_id = make_anchor_id(metric)
         stats = analysis["stats"]
@@ -375,7 +405,8 @@ def create_html_report(
             '''
 
         metric_section = f'''
-        <article id="{anchor_id}" class="mb-10 bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden scroll-mt-32">
+        <article id="{anchor_id}" data-status="{status}" data-metric="{metric.lower()}"
+                 class="metric-card mb-10 bg-white border border-gray-200 {border} rounded-2xl shadow-lg overflow-hidden scroll-mt-32">
             <!-- Metric Header -->
             <div class="bg-gradient-to-r from-gray-50 to-white border-b border-gray-100 px-6 py-5 sm:px-8 sm:py-6">
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -536,11 +567,42 @@ def create_html_report(
             </div>
         </header>
         
+        <!-- KPI strip -->
+        <section class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white border border-gray-200 rounded-xl p-4 text-center shadow-sm">
+                <div class="text-3xl font-bold text-gray-900">{counts['total']}</div>
+                <div class="text-xs uppercase tracking-wide text-gray-500">Metrics</div>
+            </div>
+            <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center shadow-sm">
+                <div class="text-3xl font-bold text-red-600">{counts['breach']}</div>
+                <div class="text-xs uppercase tracking-wide text-red-500">Breaching</div>
+            </div>
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center shadow-sm">
+                <div class="text-3xl font-bold text-amber-600">{counts['outlier']}</div>
+                <div class="text-xs uppercase tracking-wide text-amber-500">Outliers</div>
+            </div>
+            <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center shadow-sm">
+                <div class="text-3xl font-bold text-emerald-600">{counts['ok']}</div>
+                <div class="text-xs uppercase tracking-wide text-emerald-500">OK</div>
+            </div>
+        </section>
+        <!-- Needs attention -->
+        <section class="mb-8 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">Needs attention</h2>
+            {attention_table}
+        </section>
+
         <!-- Sticky Navigation -->
         <nav id="stickyNav" class="sticky top-2 z-40 mb-10 bg-white/95 backdrop-blur-md border border-gray-200 rounded-2xl shadow-xl no-print">
             <div class="p-4 sm:p-5">
                 <!-- Search and Controls -->
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap">
+                    <div class="flex gap-2" id="statusChips">
+                        <button data-status="all" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white">All</button>
+                        <button data-status="breach" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-red-100 text-red-700">Breaches</button>
+                        <button data-status="outlier" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-700">Outliers</button>
+                        <button data-status="ok" class="status-chip px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-100 text-emerald-700">OK</button>
+                    </div>
                     <div class="flex-1 relative">
                         <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                             <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -723,6 +785,29 @@ def create_html_report(
                 }});
             }}, {{rootMargin: "200px"}});
             document.querySelectorAll('.plot-spec').forEach(el => plotObserver.observe(el));
+
+            // Filter metric cards by status chip + search text
+            const cards = document.querySelectorAll('.metric-card');
+            let activeStatus = "all";
+            function applyCardFilter() {{
+                const term = (searchInput.value || "").toLowerCase().trim();
+                cards.forEach(card => {{
+                    const matchStatus = activeStatus === "all" || card.dataset.status === activeStatus;
+                    const matchText = !term || card.dataset.metric.includes(term);
+                    card.style.display = (matchStatus && matchText) ? "" : "none";
+                }});
+            }}
+            document.querySelectorAll('.status-chip').forEach(chip => {{
+                chip.addEventListener('click', () => {{
+                    activeStatus = chip.dataset.status;
+                    document.querySelectorAll('.status-chip').forEach(c => {{
+                        c.classList.toggle('ring-2', c === chip);
+                        c.classList.toggle('ring-offset-1', c === chip);
+                    }});
+                    applyCardFilter();
+                }});
+            }});
+            searchInput.addEventListener('input', applyCardFilter);
         }})();
     </script>
 </body>
