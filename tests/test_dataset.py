@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from risk_metrics_app.dataset import build_node_long_df
+from risk_metrics_app.dataset import build_node_long_df, build_long_dataset, write_long_dataset_csv
 
 
 def _sample_df():
@@ -69,3 +69,38 @@ def test_build_node_long_df_missing_limits_are_null():
     assert out["limit_min"].isna().all()
     assert out["is_breach_max"].tolist() == [False, False]
     assert out["is_breach_min"].tolist() == [False, False]
+
+
+def test_build_long_dataset_combines_nodes_and_assigns_sort_order():
+    df_a = pd.DataFrame(
+        {"valuedate": pd.to_datetime(["2026-01-01"]), "svar": [3.0], "var": [1.0]}
+    )
+    df_b = pd.DataFrame(
+        {"valuedate": pd.to_datetime(["2026-01-01"]), "svar": [4.0], "var": [2.0]}
+    )
+    # canonical order: var first, then svar
+    out = build_long_dataset({"A": df_a, "B": df_b}, ordered_metrics=["var", "svar"])
+
+    assert set(out["node"]) == {"A", "B"}
+    assert len(out) == 4  # 2 nodes * 2 metrics * 1 date
+    order = dict(zip(out["metric"], out["sort_order"]))
+    assert order["var"] == 0
+    assert order["svar"] == 1
+
+
+def test_write_long_dataset_csv_roundtrips(tmp_path):
+    df = pd.DataFrame(
+        {"valuedate": pd.to_datetime(["2026-01-01"]), "var": [1.0]}
+    )
+    long_df = build_long_dataset({"__single__": df}, ordered_metrics=["var"])
+    path = tmp_path / "powerbi_dataset.csv"
+
+    write_long_dataset_csv(long_df, str(path))
+
+    reloaded = pd.read_csv(path)
+    assert list(reloaded.columns) == [
+        "node", "valuedate", "metric", "value",
+        "limit_max", "limit_min",
+        "is_breach_max", "is_breach_min", "is_outlier", "sort_order",
+    ]
+    assert reloaded["node"].iloc[0] == "__single__"

@@ -98,3 +98,46 @@ def build_node_long_df(
         return pd.DataFrame(columns=LONG_COLUMNS)
 
     return pd.concat(frames, ignore_index=True)[LONG_COLUMNS]
+
+
+def build_long_dataset(
+    node_frames: Dict[str, pd.DataFrame],
+    ordered_metrics: List[str],
+) -> pd.DataFrame:
+    """Concatenate per-node long frames into one dataset.
+
+    Args:
+        node_frames: Maps node name -> that node's wide DataFrame. Use
+            ``{"__single__": df}`` in single (non-batch) mode.
+        ordered_metrics: Canonical priority/maturity-ordered metric list shared
+            across nodes; its index becomes each metric's ``sort_order``.
+
+    Returns:
+        Combined long-format DataFrame (columns = ``LONG_COLUMNS``).
+    """
+    sort_order_map = {metric: idx for idx, metric in enumerate(ordered_metrics)}
+
+    frames = [
+        build_node_long_df(df, ordered_metrics, node_name, sort_order_map)
+        for node_name, df in node_frames.items()
+    ]
+    frames = [f for f in frames if not f.empty]
+
+    if not frames:
+        return pd.DataFrame(columns=LONG_COLUMNS)
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def write_long_dataset_csv(long_df: pd.DataFrame, path: str) -> str:
+    """Write the long dataset to CSV. Returns the path written."""
+    long_df.to_csv(path, index=False, date_format="%Y-%m-%d")
+    return path
+
+
+__all__ = [
+    "LONG_COLUMNS",
+    "build_node_long_df",
+    "build_long_dataset",
+    "write_long_dataset_csv",
+]
