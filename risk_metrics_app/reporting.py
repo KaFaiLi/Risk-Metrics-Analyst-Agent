@@ -278,7 +278,14 @@ def create_html_report(
         fig = analysis["fig"]
         scale_context = analysis.get("scale_context")
 
-        fig_html = fig.to_html(include_plotlyjs="cdn", div_id=f"plot-{metric.replace('/', '_')}")
+        plot_div_id = f"plot-{make_anchor_id(metric)}"
+        fig_json = fig.to_json()
+        fig_html = (
+            f'<div id="{plot_div_id}" class="lazy-plot" '
+            f'style="min-height:420px"></div>'
+            f'<script type="application/json" class="plot-spec" '
+            f'data-target="{plot_div_id}">{fig_json}</script>'
+        )
 
         # Generate limit annotation HTML if adaptive scaling was applied
         limit_annotation_html = ""
@@ -474,6 +481,7 @@ def create_html_report(
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Risk Metrics Analysis Report - {file_name}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
     <script>
         tailwind.config = {{
             theme: {{
@@ -696,6 +704,25 @@ def create_html_report(
                     searchInput.blur();
                 }}
             }});
+
+            // Lazy-render Plotly charts only when scrolled into view
+            const renderPlot = (specEl) => {{
+                if (specEl.dataset.rendered) return;
+                const target = document.getElementById(specEl.dataset.target);
+                if (!target) return;
+                const spec = JSON.parse(specEl.textContent);
+                Plotly.newPlot(target, spec.data, spec.layout, {{responsive: true, displayModeBar: false}});
+                specEl.dataset.rendered = "1";
+            }};
+            const plotObserver = new IntersectionObserver((entries) => {{
+                entries.forEach(entry => {{
+                    if (entry.isIntersecting) {{
+                        renderPlot(entry.target);
+                        plotObserver.unobserve(entry.target);
+                    }}
+                }});
+            }}, {{rootMargin: "200px"}});
+            document.querySelectorAll('.plot-spec').forEach(el => plotObserver.observe(el));
         }})();
     </script>
 </body>
