@@ -691,6 +691,7 @@ def create_export_package(
     use_llm: bool,
     excluded_by_keyword: Optional[List[str]] = None,
     excluded_by_limit: Optional[List[str]] = None,
+    long_dataset_csv: Optional[str] = None,
 ) -> BytesIO:
     """Create a ZIP archive containing the report, charts, and summary text."""
     html_content = create_html_report(
@@ -706,6 +707,8 @@ def create_export_package(
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.writestr("risk_analysis_report.html", html_content)
+        if long_dataset_csv:
+            zip_file.writestr("powerbi_dataset.csv", long_dataset_csv)
 
         for analysis in metrics_analyses:
             metric = analysis["metric"]
@@ -788,6 +791,7 @@ def create_batch_export_package(
     use_llm: bool,
     excluded_by_keyword: Optional[List[str]] = None,
     excluded_by_limit: Optional[List[str]] = None,
+    long_dataset_csv: Optional[str] = None,
 ) -> BytesIO:
     """Create a ZIP archive with node-folder structure for batch mode exports.
     
@@ -812,8 +816,11 @@ def create_batch_export_package(
     excluded_by_limit = excluded_by_limit or []
     
     zip_buffer = BytesIO()
-    
+
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        if long_dataset_csv:
+            zip_file.writestr("powerbi_dataset.csv", long_dataset_csv)
+
         for node_name, metrics_analyses in batch_results.items():
             safe_node_name = sanitize_node_name(node_name)
             portfolio_summary = batch_portfolio_summaries.get(node_name, "")
