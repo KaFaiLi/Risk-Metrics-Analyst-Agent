@@ -33,14 +33,27 @@ def test_build_node_long_df_basic_shape_and_values():
 
 
 def test_build_node_long_df_flags_breach_and_outlier():
-    df = _sample_df()
+    # Five inliers at 10 plus one spike at 100: mean=25, std~36.7,
+    # so mean + 2*std ~ 98.5 and the spike is a genuine +-2SD outlier
+    # while a single spike among only three points would inflate std too much.
+    df = pd.DataFrame(
+        {
+            "valuedate": pd.to_datetime(
+                ["2026-01-01", "2026-01-02", "2026-01-03",
+                 "2026-01-04", "2026-01-05", "2026-01-06"]
+            ),
+            "var": [10.0, 10.0, 10.0, 10.0, 10.0, 100.0],
+            "var_limmaxvalue": [50.0] * 6,
+            "var_limminvalue": [0.0] * 6,
+        }
+    )
     out = build_node_long_df(df, ordered_metrics=["var"], node_name="NodeA", sort_order_map={"var": 0})
 
-    # value 100 > limit_max 50 -> max breach on the third row only
-    assert out["is_breach_max"].tolist() == [False, False, True]
-    assert out["is_breach_min"].tolist() == [False, False, False]
+    # value 100 > limit_max 50 -> max breach on the last row only
+    assert out["is_breach_max"].tolist() == [False, False, False, False, False, True]
+    assert out["is_breach_min"].tolist() == [False] * 6
     # 100 is the only point > mean + 2*std
-    assert out["is_outlier"].tolist() == [False, False, True]
+    assert out["is_outlier"].tolist() == [False, False, False, False, False, True]
 
 
 def test_build_node_long_df_missing_limits_are_null():
