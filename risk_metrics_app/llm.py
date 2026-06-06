@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Coroutine
 
-from langchain.schema import HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .config import LLM_RETRY_DELAY, MAX_LLM_ATTEMPTS, MAX_LLM_CONCURRENCY, logger
