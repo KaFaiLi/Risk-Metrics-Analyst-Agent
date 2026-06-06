@@ -724,6 +724,7 @@ def create_html_report(
             clearSearch.addEventListener('click', () => {{
                 searchInput.value = '';
                 updateVisibility('');
+                applyCardFilter();
                 searchInput.focus();
             }});
             
@@ -785,6 +786,11 @@ def create_html_report(
                 }});
             }}, {{rootMargin: "200px"}});
             document.querySelectorAll('.plot-spec').forEach(el => plotObserver.observe(el));
+
+            // Render every chart before printing so off-screen charts are not blank in PDF/print
+            window.addEventListener('beforeprint', () => {{
+                document.querySelectorAll('.plot-spec').forEach(renderPlot);
+            }});
 
             // Filter metric cards by status chip + search text
             const cards = document.querySelectorAll('.metric-card');
