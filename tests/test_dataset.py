@@ -1,7 +1,13 @@
 import numpy as np
 import pandas as pd
+import pytest
 
-from risk_metrics_app.dataset import build_node_long_df, build_long_dataset, write_long_dataset_csv
+from risk_metrics_app.dataset import (
+    build_node_long_df,
+    build_long_dataset,
+    write_long_dataset_csv,
+    write_long_dataset_parquet,
+)
 
 
 def _sample_df():
@@ -104,3 +110,26 @@ def test_write_long_dataset_csv_roundtrips(tmp_path):
         "is_breach_max", "is_breach_min", "is_outlier", "sort_order",
     ]
     assert reloaded["node"].iloc[0] == "__single__"
+
+
+def test_write_long_dataset_parquet_roundtrips(tmp_path):
+    pytest.importorskip("pyarrow")
+
+    df = pd.DataFrame(
+        {"valuedate": pd.to_datetime(["2026-01-01", "2026-01-02"]), "var": [1.0, 2.0]}
+    )
+    long_df = build_long_dataset({"__single__": df}, ordered_metrics=["var"])
+    path = tmp_path / "long_dataset.parquet"
+
+    write_long_dataset_parquet(long_df, str(path))
+
+    reloaded = pd.read_parquet(path)
+    assert list(reloaded.columns) == [
+        "node", "valuedate", "metric", "value",
+        "limit_max", "limit_min",
+        "is_breach_max", "is_breach_min", "is_outlier", "sort_order",
+    ]
+    assert reloaded["node"].iloc[0] == "__single__"
+    # valuedate keeps a native datetime dtype rather than being stringified.
+    assert pd.api.types.is_datetime64_any_dtype(reloaded["valuedate"])
+    assert reloaded["value"].tolist() == [1.0, 2.0]

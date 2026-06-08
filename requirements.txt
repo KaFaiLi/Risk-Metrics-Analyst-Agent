@@ -7,6 +7,8 @@ plotly
 kaleido
 pandas
 numpy
+# Parquet engine for the long-format dataset export (process_extraction.py)
+pyarrow
 langchain
 # The code imports `ChatGoogleGenerativeAI` from `langchain_google_genai`.
 # Depending on the package you used, the PyPI name may be one of:
