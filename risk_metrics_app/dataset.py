@@ -135,9 +135,21 @@ def write_long_dataset_csv(long_df: pd.DataFrame, path: str) -> str:
     return path
 
 
+def write_long_dataset_parquet(long_df: pd.DataFrame, path: str) -> str:
+    """Write the long dataset to Parquet. Returns the path written.
+
+    Requires a Parquet engine (``pyarrow`` or ``fastparquet``). The
+    ``valuedate`` column keeps its native datetime dtype so downstream
+    consumers get proper timestamps rather than strings.
+    """
+    long_df.to_parquet(path, index=False)
+    return path
+
+
 __all__ = [
     "LONG_COLUMNS",
     "build_node_long_df",
     "build_long_dataset",
     "write_long_dataset_csv",
+    "write_long_dataset_parquet",
 ]
